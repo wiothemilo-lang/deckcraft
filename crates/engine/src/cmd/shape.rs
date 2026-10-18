@@ -1528,3 +1528,7 @@ mod tests {
         assert_eq!(s.active().unwrap().interaction.as_ref().unwrap().label, "Move");
     }
 }
+
+#[cfg(test)]
+#[path = "shape_format_tests.rs"]
+mod shape_format_tests;
