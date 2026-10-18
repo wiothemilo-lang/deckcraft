@@ -94,6 +94,26 @@ fn text_editing_flow() {
     assert_eq!(s.doc().unwrap().selection.shapes.len(), 1);
 }
 
+/// Cut with only a caret copies nothing, so it must not delete the character after the caret.
+#[test]
+fn cut_with_only_a_caret_changes_nothing() {
+    let mut s = session();
+    let r = s.execute("insert.textBox", &json!({"text": "Hello"})).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    s.execute("text.edit", &json!({"id": id})).unwrap();
+    s.execute("text.move", &json!({"to": "start"})).unwrap();
+    let out = s.execute("edit.cut", &json!({})).unwrap();
+    assert_eq!(out["text"], "");
+    let t = s.execute("text.get", &json!({"id": id})).unwrap();
+    assert_eq!(t["text"], "Hello", "cut with only a caret changed the text");
+    // A real selection is still cut.
+    s.execute("text.move", &json!({"to": "end", "extend": true})).unwrap();
+    let out = s.execute("edit.cut", &json!({})).unwrap();
+    assert_eq!(out["text"], "Hello");
+    let t = s.execute("text.get", &json!({"id": id})).unwrap();
+    assert_eq!(t["text"], "");
+}
+
 #[test]
 fn editing_text_refits_a_saved_shrink() {
     use deckcraft_model::text::AutoFit;
