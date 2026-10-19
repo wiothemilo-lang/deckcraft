@@ -455,10 +455,10 @@ pub fn box_view(c: &Chart) -> (Chart, Boxes) {
     for (s, st) in v.series.iter_mut().zip(&stats) {
         s.values = st.iter().map(|b| b.as_ref().map(|b| ext(b, true))).collect();
     }
-    if lowest.is_finite() && lowest < 0.0 && v.y_min.is_none() {
+    if lowest.is_finite() && lowest < 0.0 && v.axis.y_min.is_none() {
         // The frame's values are the highs; below zero the axis must reach the lowest point too.
         let mag = 10f64.powf(lowest.abs().log10().floor());
-        v.y_min = Some((lowest / mag).floor() * mag);
+        v.axis.y_min = Some((lowest / mag).floor() * mag);
     }
     (v, Boxes { stats })
 }

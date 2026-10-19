@@ -326,11 +326,11 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
         // The other vertical value axis is the secondary one.
         if let Some(a) = pa.children_named("valAx").find(|a| a.child_val("axId") != primary_id && vertical(a)) {
             let sc = a.child("scaling");
-            c.y2_min = sc.and_then(|s| num(s, "min"));
-            c.y2_max = sc.and_then(|s| num(s, "max"));
-            c.y2_major = num(a, "majorUnit");
-            c.y2_format = format_code(a);
-            c.y2_hidden = deleted(a);
+            c.axis.y2_min = sc.and_then(|s| num(s, "min"));
+            c.axis.y2_max = sc.and_then(|s| num(s, "max"));
+            c.axis.y2_major = num(a, "majorUnit");
+            c.axis.y2_format = format_code(a);
+            c.axis.y2_hidden = deleted(a);
         }
     }
     let cat_ax = pa.child("catAx").or_else(|| pa.child("dateAx")).or_else(|| pa.children_named("valAx").find(|a| !vertical(a)));
@@ -338,16 +338,16 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
         c.gridlines = v.child("majorGridlines").is_some();
         c.minor_gridlines = v.child("minorGridlines").is_some();
         let sc = v.child("scaling");
-        c.y_min = sc.and_then(|s| s.child_val("min")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
-        c.y_max = sc.and_then(|s| s.child_val("max")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
+        c.axis.y_min = sc.and_then(|s| s.child_val("min")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
+        c.axis.y_max = sc.and_then(|s| s.child_val("max")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
         c.axis_titles.1 = v.child("title").map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
-        c.y_major = num(v, "majorUnit");
-        c.y_log_base = sc.and_then(|s| s.child_val("logBase")).and_then(|v| v.parse().ok()).filter(|b: &f64| b.is_finite() && *b >= 2.0);
-        c.y_format = format_code(v);
-        c.y_hidden = deleted(v);
+        c.axis.y_major = num(v, "majorUnit");
+        c.axis.y_log_base = sc.and_then(|s| s.child_val("logBase")).and_then(|v| v.parse().ok()).filter(|b: &f64| b.is_finite() && *b >= 2.0);
+        c.axis.y_format = format_code(v);
+        c.axis.y_hidden = deleted(v);
     }
     if let Some(a) = cat_ax {
-        c.cat_reversed = a.child("scaling").and_then(|s| s.child_val("orientation")).is_some_and(|o| o == "maxMin");
+        c.axis.cat_reversed = a.child("scaling").and_then(|s| s.child_val("orientation")).is_some_and(|o| o == "maxMin");
         c.axis_titles.0 = a.child("title").map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
     }
     // Text sizes as the file sets them (PowerPoint draws chart text at these sizes, not scaled to
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn log_base_is_read() {
         let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:lineChart><c:axId val="1"/><c:axId val="2"/></c:lineChart><c:catAx><c:axId val="1"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:logBase val="10"/><c:orientation val="minMax"/></c:scaling></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
-        assert_eq!(read_chart_xml(xml).unwrap().y_log_base, Some(10.0));
+        assert_eq!(read_chart_xml(xml).unwrap().axis.y_log_base, Some(10.0));
     }
 
     #[test]
@@ -598,8 +598,8 @@ mod tests {
         assert_eq!(c.series[1].kind, Some(ChartType::LineMarkers));
         assert!(c.series[1].line.as_ref().is_some_and(|l| l.width.is_some_and(|w| (w - 2.25).abs() < 0.01)));
         // Each value axis' number format, bounds and unit; the chart's language.
-        assert_eq!(c.y_format.as_deref(), Some("#,##0"));
-        assert_eq!((c.y_major, c.y2_max, c.y2_format.as_deref()), (Some(100000.0), Some(8000.0), Some("0.0")));
+        assert_eq!(c.axis.y_format.as_deref(), Some("#,##0"));
+        assert_eq!((c.axis.y_major, c.axis.y2_max, c.axis.y2_format.as_deref()), (Some(100000.0), Some(8000.0), Some("0.0")));
         assert_eq!(c.lang.as_deref(), Some("ru-RU"));
         // Group order doesn't decide: columns on the right-hand axis are the secondary series even
         // when their group comes first, and the line on the left is primary.
@@ -611,7 +611,7 @@ mod tests {
             .replace("<c:axPos val=\"r\"/><c:numFmt formatCode=\"0.0\"", "<c:axPos val=\"l\"/><c:numFmt formatCode=\"0.0\"");
         let c2 = read_chart_xml(swapped.as_bytes()).unwrap();
         assert!(c2.series[0].secondary_axis && !c2.series[1].secondary_axis);
-        assert_eq!((c2.y_format.as_deref(), c2.y2_format.as_deref()), (Some("0.0"), Some("#,##0")));
+        assert_eq!((c2.axis.y_format.as_deref(), c2.axis.y2_format.as_deref()), (Some("0.0"), Some("#,##0")));
         // A chart of one type on one axis has no secondary series.
         let single = String::from_utf8_lossy(xml)
             .replace("<c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>", "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>");
@@ -627,7 +627,7 @@ mod tests {
                 r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:formatCode>#,##0</c:formatCode><c:ptCount val="1"/><c:pt idx="0"><c:v>1200</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/></c:catAx><c:valAx><c:axId val="2"/>{ax_fmt}<c:axPos val="l"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#
             )
         };
-        let fmt = |x: &str| read_chart_xml(xml(x).as_bytes()).unwrap().y_format;
+        let fmt = |x: &str| read_chart_xml(xml(x).as_bytes()).unwrap().axis.y_format;
         assert_eq!(fmt("").as_deref(), Some("#,##0"));
         assert_eq!(fmt(r#"<c:numFmt formatCode="General" sourceLinked="1"/>"#).as_deref(), Some("#,##0"));
         assert_eq!(fmt(r#"<c:numFmt formatCode="0.0" sourceLinked="0"/>"#).as_deref(), Some("0.0"));
@@ -639,13 +639,13 @@ mod tests {
         let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr></a:pPr></a:p></c:txPr></c:catAx><c:valAx><c:axId val="2"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
         let c = read_chart_xml(xml.as_bytes()).unwrap();
         assert_eq!(c.text_color, Some(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255))));
-        assert!(!c.cat_reversed);
+        assert!(!c.axis.cat_reversed);
         let rev = read_chart_xml(
             xml.replace("<c:catAx><c:axId val=\"1\"/>", "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/></c:scaling>")
                 .as_bytes(),
         )
         .unwrap();
-        assert!(rev.cat_reversed, "maxMin reverses the category axis");
+        assert!(rev.axis.cat_reversed, "maxMin reverses the category axis");
         // No c:gapWidth / c:overlap: the schema's 150 % and 0 %.
         assert_eq!((c.gap_width, c.overlap), (1.5, 0.0));
     }

@@ -367,7 +367,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     let axis_len = if horiz { area.width() - base * 4.5 } else { area.height() - base * 1.8 };
     let max_intervals = (axis_len / if horiz { base * 6.0 } else { base * 1.9 }).floor().clamp(2.0, 12.0) as usize;
     // A logarithmic axis is scaled in exponents of its base.
-    let log = c.log_axis_scale(max_intervals).map(|sc| (c.y_log_base.unwrap_or(10.0), sc));
+    let log = c.log_axis_scale(max_intervals).map(|sc| (c.axis.y_log_base.unwrap_or(10.0), sc));
     let (min, max, step) = match log {
         Some((_, sc)) => sc,
         None => c.axis_scale(false, max_intervals).unwrap_or_else(|| axis_scale(0.0, 1.0, None, None, None, max_intervals, true)),
@@ -390,12 +390,12 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     };
     let gutter = if horiz {
         base * 4.5
-    } else if c.y_hidden {
+    } else if c.axis.y_hidden {
         base * 0.5
     } else {
         clamp_soft(label_w(false, (min, max, step)), base * 1.5, area.width() * 0.3)
     };
-    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| clamp_soft(label_w(true, sc), base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
+    let gutter_r = second.filter(|_| !c.axis.y2_hidden).map(|sc| clamp_soft(label_w(true, sc), base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
     let plot = if horiz {
         Rect::new(area.x0 + gutter, area.y0, area.x1, area.y1 - base * 1.6)
     } else {
@@ -441,7 +441,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     // Gridlines and value labels.
     for &v in &primary_ticks {
         let pos = to_v(v);
-        let text = if c.y_hidden { String::new() } else { c.axis_label(false, v) };
+        let text = if c.axis.y_hidden { String::new() } else { c.axis_label(false, v) };
         let mut g = BezPath::new();
         if horiz {
             g.move_to((pos, plot.y0));
@@ -482,7 +482,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         }
     }
     // The secondary axis' labels, on the right, without gridlines of their own.
-    if let Some(sc) = second.filter(|_| !c.y2_hidden) {
+    if let Some(sc) = second.filter(|_| !c.axis.y2_hidden) {
         for v in ticks(sc) {
             let pos = to_axis(true, v);
             label(
@@ -508,7 +508,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     // Where category `i`'s band starts along its axis: left to right, or bottom to top on a
     // horizontal bar chart, unless the axis is reversed. The forecast's empty slots stay on
     // their own side of the data.
-    let backwards = horiz != c.cat_reversed;
+    let backwards = horiz != c.axis.cat_reversed;
     let slot = |i: usize| if backwards { ncat.saturating_sub(i + 1) as f64 + fwd } else { i as f64 + back };
     // Scatter and bubble charts have a value x axis: one scale over every series' x values, with its
     // own tick labels in place of category names.

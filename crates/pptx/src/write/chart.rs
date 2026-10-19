@@ -369,7 +369,7 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
         w.open0("c:catAx");
         w.val("c:axId", AX_CAT);
         w.open0("c:scaling");
-        w.val("c:orientation", if c.cat_reversed { "maxMin" } else { "minMax" });
+        w.val("c:orientation", if c.axis.cat_reversed { "maxMin" } else { "minMax" });
         w.close("c:scaling");
         w.val("c:delete", 0);
         w.val("c:axPos", cat_pos);
@@ -391,14 +391,14 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     w.open0("c:valAx");
     w.val("c:axId", AX_VAL);
     w.open0("c:scaling");
-    if let Some(b) = c.y_log_base {
+    if let Some(b) = c.axis.y_log_base {
         w.val("c:logBase", fmt_num(b));
     }
     w.val("c:orientation", "minMax");
-    if let Some(m) = c.y_max.filter(|v| v.is_finite()) {
+    if let Some(m) = c.axis.y_max.filter(|v| v.is_finite()) {
         w.val("c:max", fmt_num(m));
     }
-    if let Some(m) = c.y_min.filter(|v| v.is_finite()) {
+    if let Some(m) = c.axis.y_min.filter(|v| v.is_finite()) {
         w.val("c:min", fmt_num(m));
     }
     w.close("c:scaling");
@@ -413,7 +413,7 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     if let Some(t) = &c.axis_titles.1 {
         title(w, t);
     }
-    match c.y_format.as_deref().filter(|f| !f.is_empty()) {
+    match c.axis.y_format.as_deref().filter(|f| !f.is_empty()) {
         Some(f) => w.empty("c:numFmt", A::new().a("formatCode", f).a("sourceLinked", 0)),
         None => w.empty("c:numFmt", A::new().a("formatCode", if c.kind.percent() { "0%" } else { "General" }).a("sourceLinked", 1)),
     }
@@ -976,11 +976,11 @@ mod tests {
     #[test]
     fn reversed_category_axis_round_trips() {
         let mut c = Chart::sample(ChartType::Bar);
-        c.cat_reversed = true;
+        c.axis.cat_reversed = true;
         let xml = super::chart_xml(&c).0;
         assert!(String::from_utf8_lossy(&xml).contains(r#"<c:orientation val="maxMin"/>"#));
-        assert!(crate::read::chart::read_chart_xml(&xml).unwrap().cat_reversed);
-        c.cat_reversed = false;
-        assert!(!crate::read::chart::read_chart_xml(&super::chart_xml(&c).0).unwrap().cat_reversed);
+        assert!(crate::read::chart::read_chart_xml(&xml).unwrap().axis.cat_reversed);
+        c.axis.cat_reversed = false;
+        assert!(!crate::read::chart::read_chart_xml(&super::chart_xml(&c).0).unwrap().axis.cat_reversed);
     }
 }

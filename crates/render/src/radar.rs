@@ -71,7 +71,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rec
         }
     }
     // Value labels up the first spoke.
-    if !c.y_hidden {
+    if !c.axis.y_hidden {
         for k in 0..=ticks {
             let v = min + step * k as f64;
             let q = spoke(cen, r, 0, n, k as f64 / ticks as f64);

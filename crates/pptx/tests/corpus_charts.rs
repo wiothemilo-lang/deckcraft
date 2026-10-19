@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use deckcraft_color::Rgba;
 use deckcraft_geom::Xfrm;
-use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType};
+use deckcraft_model::chart::{Chart, ChartAxis, ChartType, Series, Trendline, TrendlineType};
 use deckcraft_model::style::{ColorRef, Line};
 use deckcraft_model::table::Table;
 use deckcraft_model::text::{AutoFit, TextBody, TextDir};
@@ -49,8 +49,7 @@ fn corpus() -> Presentation {
         title: Some("Spend and clicks".into()),
         categories: vec!["W1".into(), "W2".into(), "W3".into(), "W4".into()],
         data_labels: true,
-        y2_max: Some(8000.0),
-        y2_format: Some("0.0".into()),
+        axis: ChartAxis { y2_max: Some(8000.0), y2_format: Some("0.0".into()), ..Default::default() },
         series: vec![
             Series {
                 name: "Spend".into(),
