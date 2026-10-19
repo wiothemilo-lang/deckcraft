@@ -314,6 +314,33 @@ impl ErrorBars {
     }
 }
 
+/// The value axes of a chart: bounds, units, number formats and visibility of the primary
+/// (`y_*`) value axis and of a combo chart's secondary (`y2_*`) one, plus the category axis'
+/// direction.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ChartAxis {
+    pub y_min: Option<f64>,
+    pub y_max: Option<f64>,
+    /// The value axis' major unit, when the chart fixes it.
+    pub y_major: Option<f64>,
+    /// `c:scaling/c:logBase`: the value axis is logarithmic in this base (2–1000).
+    pub y_log_base: Option<f64>,
+    /// The value axis' number format (an Excel format code such as `#,##0` or `0.0%`).
+    pub y_format: Option<String>,
+    /// The value axis is deleted (`c:delete`): no labels, though gridlines may stay.
+    pub y_hidden: bool,
+    /// The category axis runs backwards (`c:orientation val="maxMin"`): right to left, or on a
+    /// horizontal bar chart top to bottom (the default puts the first category at the bottom).
+    pub cat_reversed: bool,
+    /// A combo chart's secondary value axis: bounds, major unit and number format.
+    pub y2_min: Option<f64>,
+    pub y2_max: Option<f64>,
+    pub y2_major: Option<f64>,
+    pub y2_format: Option<String>,
+    pub y2_hidden: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Chart {
@@ -346,25 +373,9 @@ pub struct Chart {
     pub gap_width: f64,
     pub overlap: f64,
     pub vary_colors: bool,
-    pub y_min: Option<f64>,
-    pub y_max: Option<f64>,
-    /// The value axis' major unit, when the chart fixes it.
-    pub y_major: Option<f64>,
-    /// `c:scaling/c:logBase`: the value axis is logarithmic in this base (2–1000).
-    pub y_log_base: Option<f64>,
-    /// The value axis' number format (an Excel format code such as `#,##0` or `0.0%`).
-    pub y_format: Option<String>,
-    /// The value axis is deleted (`c:delete`): no labels, though gridlines may stay.
-    pub y_hidden: bool,
-    /// The category axis runs backwards (`c:orientation val="maxMin"`): right to left, or on a
-    /// horizontal bar chart top to bottom (the default puts the first category at the bottom).
-    pub cat_reversed: bool,
-    /// A combo chart's secondary value axis: bounds, major unit and number format.
-    pub y2_min: Option<f64>,
-    pub y2_max: Option<f64>,
-    pub y2_major: Option<f64>,
-    pub y2_format: Option<String>,
-    pub y2_hidden: bool,
+    /// The value axes: bounds, units, formats and visibility, and the category axis' direction.
+    #[serde(flatten)]
+    pub axis: ChartAxis,
     /// The chart's language (`c:lang`, e.g. `ru-RU`): digit grouping and decimal mark.
     pub lang: Option<String>,
     /// A waterfall's total points (`cx:subtotals`): bars that stand on the axis and restart
@@ -451,18 +462,7 @@ impl Default for Chart {
             gap_width: 2.19,
             overlap: -0.27,
             vary_colors: false,
-            y_min: None,
-            y_max: None,
-            y_major: None,
-            y_log_base: None,
-            y_format: None,
-            y_hidden: false,
-            cat_reversed: false,
-            y2_min: None,
-            y2_max: None,
-            y2_major: None,
-            y2_format: None,
-            y2_hidden: false,
+            axis: ChartAxis::default(),
             lang: None,
             subtotals: vec![],
             category_levels: vec![],
@@ -564,7 +564,7 @@ impl Chart {
         }
         let (lo, hi) = self.plotted_extent(secondary)?;
         let (lo, hi) = (lo.min(0.0), hi.max(0.0));
-        Some(if secondary { (lo, hi) } else { (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi)) })
+        Some(if secondary { (lo, hi) } else { (self.axis.y_min.unwrap_or(lo), self.axis.y_max.unwrap_or(hi)) })
     }
 
     /// The smallest and largest value plotted against one value axis: plain values as they are,
@@ -646,7 +646,8 @@ impl Chart {
     /// `None` when no series uses the axis.
     pub fn axis_scale(&self, secondary: bool, max_intervals: usize) -> Option<(f64, f64, f64)> {
         let (lo, hi) = self.plotted_extent(secondary)?;
-        let (fmin, fmax, major) = if secondary { (self.y2_min, self.y2_max, self.y2_major) } else { (self.y_min, self.y_max, self.y_major) };
+        let (fmin, fmax, major) =
+            if secondary { (self.axis.y2_min, self.axis.y2_max, self.axis.y2_major) } else { (self.axis.y_min, self.axis.y_max, self.axis.y_major) };
         let full_percent = !secondary && self.kind.percent();
         Some(axis_scale(lo, hi, fmin, fmax, major, max_intervals, !full_percent))
     }
@@ -655,21 +656,21 @@ impl Chart {
     /// `base^min`, `base^(min+unit)`… — covering the positive values: whole powers, as PowerPoint
     /// and LibreOffice draw them. `None` when the axis isn't logarithmic or nothing is positive.
     pub fn log_axis_scale(&self, max_intervals: usize) -> Option<(f64, f64, f64)> {
-        let b = self.y_log_base.filter(|b| b.is_finite() && *b >= 2.0)?;
+        let b = self.axis.y_log_base.filter(|b| b.is_finite() && *b >= 2.0)?;
         let vals = self.series.iter().filter(|s| !self.on_secondary(s)).flat_map(|s| s.values.iter().flatten().copied());
         let (lo, hi) = vals
             .filter(|v| v.is_finite() && *v > 0.0)
             .fold(None, |r: Option<(f64, f64)>, v| Some(r.map_or((v, v), |(a, z)| (a.min(v), z.max(v)))))?;
         let e = |v: f64| v.log(b);
-        let lo = self.y_min.filter(|v| *v > 0.0).map_or(e(lo).floor(), e);
-        let hi = self.y_max.filter(|v| *v > 0.0).map_or(e(hi).ceil(), e).max(lo + 1.0);
+        let lo = self.axis.y_min.filter(|v| *v > 0.0).map_or(e(lo).floor(), e);
+        let hi = self.axis.y_max.filter(|v| *v > 0.0).map_or(e(hi).ceil(), e).max(lo + 1.0);
         let unit = ((hi - lo) / max_intervals.max(1) as f64).ceil().max(1.0);
         Some((lo, lo + ((hi - lo) / unit).ceil() * unit, unit))
     }
 
     /// A value axis label in the axis' number format and the chart's language.
     pub fn axis_label(&self, secondary: bool, v: f64) -> String {
-        let code = if secondary { &self.y2_format } else { &self.y_format };
+        let code = if secondary { &self.axis.y2_format } else { &self.axis.y_format };
         // A 100 % stacked chart's value axis counts in percent unless the file says otherwise.
         let code = match code.as_deref() {
             None | Some("General") if !secondary && self.kind.percent() => "0%",
@@ -680,7 +681,7 @@ impl Chart {
 
     /// A data label of series `s`: its number format, else its axis', in the chart's language.
     pub fn data_label(&self, s: &Series, v: f64) -> String {
-        let axis = if self.on_secondary(s) { &self.y2_format } else { &self.y_format };
+        let axis = if self.on_secondary(s) { &self.axis.y2_format } else { &self.axis.y_format };
         let code = s.number_format.as_ref().or(axis.as_ref());
         crate::numfmt::format(code.map_or("General", String::as_str), v, self.lang.as_deref())
     }
@@ -728,7 +729,7 @@ impl Chart {
                 }
             }
         }
-        (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi))
+        (self.axis.y_min.unwrap_or(lo), self.axis.y_max.unwrap_or(hi))
     }
 }
 
@@ -831,7 +832,7 @@ mod tests {
         c.series.truncate(1);
         c.series[0].values = vec![Some(1.0), Some(10.0), Some(1000.0), Some(50000.0)];
         assert_eq!(c.log_axis_scale(8), None);
-        c.y_log_base = Some(10.0);
+        c.axis.y_log_base = Some(10.0);
         assert_eq!(c.log_axis_scale(8), Some((0.0, 5.0, 1.0)));
         assert_eq!(c.log_axis_scale(2), Some((0.0, 6.0, 3.0)));
     }
@@ -942,17 +943,17 @@ mod tests {
     #[test]
     fn fixed_axis_limits_are_kept() {
         let mut c = column(&[42.1, 18.7, 6.3]);
-        c.y_max = Some(50.0);
+        c.axis.y_max = Some(50.0);
         assert_eq!(scale(&c), (0.0, 50.0, 5.0));
-        c.y_min = Some(10.0);
-        c.y_max = None;
+        c.axis.y_min = Some(10.0);
+        c.axis.y_max = None;
         assert_eq!(scale(&c), (10.0, 45.0, 5.0));
         // A fixed limit beyond the data: the automatic end gives way to it.
         let mut c = column(&[85.0, 92.0, 97.0]);
-        c.y_max = Some(50.0);
+        c.axis.y_max = Some(50.0);
         assert_eq!(scale(&c), (0.0, 50.0, 5.0));
         let mut c = column(&[-50.0, -48.0]);
-        c.y_min = Some(-10.0);
+        c.axis.y_min = Some(-10.0);
         assert_eq!(scale(&c), (-10.0, 0.0, 1.0));
     }
 
@@ -1011,7 +1012,7 @@ mod tests {
     #[test]
     fn axis_labels_use_the_format_and_language() {
         let mut c = Chart::sample(ChartType::Column);
-        c.y_format = Some(r#"_-* #\ ##0\ "₽"_-;\-* #\ ##0\ "₽"_-;_-* "-"??\ "₽"_-;_-@_-"#.into());
+        c.axis.y_format = Some(r#"_-* #\ ##0\ "₽"_-;\-* #\ ##0\ "₽"_-;_-* "-"??\ "₽"_-;_-@_-"#.into());
         c.lang = Some("ru-RU".into());
         assert_eq!(c.axis_label(false, 800_000.0), "800\u{a0}000 ₽");
         assert_eq!(c.axis_label(false, 0.0), "- ₽");
@@ -1030,7 +1031,7 @@ mod tests {
     fn full_percent_axes_count_in_percent() {
         let mut c = Chart::sample(ChartType::PercentColumn);
         assert_eq!(c.axis_label(false, 0.5), "50%");
-        c.y_format = Some("0.0%".into());
+        c.axis.y_format = Some("0.0%".into());
         assert_eq!(c.axis_label(false, 0.5), "50.0%");
         let c = Chart::sample(ChartType::Column);
         assert_eq!(c.axis_label(false, 0.5), "0.5");
@@ -1182,10 +1183,10 @@ impl Chart {
                 secondary_axis: true,
                 ..Default::default()
             });
-            v.y2_min = Some(0.0);
-            v.y2_max = Some(1.0);
-            v.y2_major = Some(0.2);
-            v.y2_format = Some("0%".into());
+            v.axis.y2_min = Some(0.0);
+            v.axis.y2_max = Some(1.0);
+            v.axis.y2_major = Some(0.2);
+            v.axis.y2_format = Some("0%".into());
         }
         v.vary_colors = false;
         v

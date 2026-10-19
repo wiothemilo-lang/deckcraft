@@ -222,8 +222,8 @@ fn trend_chart(title: &str, kind: ChartType, ys: &[f64], trend: Trendline, y_max
     c.series.truncate(1);
     c.series[0].name = "Data".into();
     c.series[0].values = ys.iter().copied().map(Some).collect();
-    c.y_min = Some(0.0);
-    c.y_max = Some(y_max);
+    c.axis.y_min = Some(0.0);
+    c.axis.y_max = Some(y_max);
     c.series[0].trendlines = vec![trend];
     c
 }
@@ -393,7 +393,7 @@ fn horizontal_bars_list_the_first_category_at_the_bottom_unless_reversed() {
         c.categories = vec!["A".into(), "B".into(), "C".into()];
         c.series[0].values = vec![Some(10.0), Some(10.0), Some(10.0)];
         c.series[0].point_fills = vec![(0, deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))))];
-        c.cat_reversed = reversed;
+        c.axis.cat_reversed = reversed;
         let sh = Shape { id: ShapeId(623), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
         let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
         let rows: Vec<u32> = (0..540).filter(|y| (0..960).any(|x| img.pixel(x, *y)[..3] == [255, 0, 0])).collect();
