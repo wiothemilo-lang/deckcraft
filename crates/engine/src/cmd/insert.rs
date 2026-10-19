@@ -2260,3 +2260,7 @@ mod icon_and_picture_tests {
 #[cfg(test)]
 #[path = "insert_text_and_buttons_tests.rs"]
 mod insert_text_and_buttons_tests;
+
+#[cfg(test)]
+#[path = "chart_type_tests.rs"]
+mod chart_type_tests;

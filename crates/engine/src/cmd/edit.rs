@@ -691,3 +691,7 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     Ok(json!({"selected": s.doc()?.selection.shapes}))
 }
+
+#[cfg(test)]
+#[path = "edit_tests.rs"]
+mod edit_tests;

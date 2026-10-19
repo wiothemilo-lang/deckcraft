@@ -793,6 +793,97 @@ mod tests {
         s.execute("show.setup", &json!({"custom": ""})).unwrap();
         assert!(s.active().unwrap().doc.show.custom_show.is_none());
     }
+
+    use deckcraft_model::ShapeId;
+
+    /// An 8×8 red PNG.
+    fn png() -> Vec<u8> {
+        vec![
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 8, 0, 0, 0, 8, 8, 2, 0, 0, 0, 75, 109, 41, 220, 0, 0, 0, 17, 73,
+            68, 65, 84, 120, 156, 99, 184, 163, 161, 129, 21, 49, 12, 45, 9, 0, 123, 123, 75, 1, 251, 162, 81, 240, 0, 0, 0, 0, 73, 69, 78, 68, 174,
+            66, 96, 130,
+        ]
+    }
+
+    #[test]
+    fn accessibility_names_the_missing_title_alt_text_and_contrast() {
+        let mut s = Session::with_new();
+        assert_eq!(s.execute("review.accessibility", &json!({})).unwrap(), json!([{"slide": 0, "issue": "Missing slide title"}]));
+
+        // A titled slide with a body reads clean.
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "B"})).unwrap();
+        s.execute("slide.delete", &json!({"index": 0})).unwrap();
+        assert_eq!(s.execute("review.accessibility", &json!({})).unwrap(), json!([]));
+
+        // A chart has no description: reported with its slide, id, name and what is wrong.
+        let chart = ShapeId(s.execute("insert.chart", &json!({})).unwrap()["id"].as_u64().unwrap() as u32);
+        let issues = s.execute("review.accessibility", &json!({})).unwrap();
+        assert_eq!(issues.as_array().unwrap().len(), 1, "{issues}");
+        assert_eq!(issues[0]["slide"], 0);
+        assert_eq!(issues[0]["shape"], chart.0);
+        assert!(issues[0]["name"].is_string(), "{issues}");
+        assert_eq!(issues[0]["issue"], "Missing alternative text");
+        s.execute("shape.altText", &json!({"text": "Sales by quarter"})).unwrap();
+        assert_eq!(s.execute("review.accessibility", &json!({})).unwrap(), json!([]));
+        // Decorative shapes need no description; a cleared one that is not decorative is flagged.
+        s.execute("shape.altText", &json!({"decorative": true})).unwrap();
+        assert_eq!(s.execute("review.accessibility", &json!({})).unwrap(), json!([]));
+        s.execute("shape.altText", &json!({})).unwrap();
+        assert_eq!(s.execute("review.accessibility", &json!({})).unwrap(), json!([]));
+        s.execute("shape.altText", &json!({"decorative": false})).unwrap();
+        let issues = s.execute("review.accessibility", &json!({})).unwrap();
+        assert_eq!(issues.as_array().unwrap().len(), 1, "{issues}");
+        assert_eq!(issues[0]["shape"], chart.0);
+
+        // A picture takes its file name as its description.
+        s.execute("insert.picture", &json!({"name": "dot.png", "data": base64_encode(&png())})).unwrap();
+        let issues = s.execute("review.accessibility", &json!({})).unwrap();
+        assert_eq!(issues.as_array().unwrap().len(), 1, "the picture needs nothing: {issues}");
+        assert_eq!(issues[0]["shape"], chart.0);
+
+        // White text without a box fill on the white slide is hard to read.
+        let tb = ShapeId(s.execute("insert.textBox", &json!({"rect": [100, 100, 300, 80], "text": "faint"})).unwrap()["id"].as_u64().unwrap() as u32);
+        s.edit(|doc, _| {
+            let sl = std::sync::Arc::make_mut(&mut doc.slides[0]);
+            let sh = sl.shapes.iter_mut().find(|x| x.id == tb).expect("the text box");
+            for p in &mut sh.text.as_mut().expect("text").paragraphs {
+                for run in &mut p.runs {
+                    run.props.fill = Some(deckcraft_model::Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_model::Rgba::rgb(255, 255, 255))));
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+        let issues = s.execute("review.accessibility", &json!({})).unwrap();
+        let contrast: Vec<&Value> =
+            issues.as_array().unwrap().iter().filter(|i| i["issue"].as_str().is_some_and(|x| x.starts_with("Hard-to-read"))).collect();
+        assert_eq!(contrast.len(), 1, "{issues}");
+        assert_eq!(contrast[0]["shape"], tb.0);
+        assert_eq!(contrast[0]["issue"], "Hard-to-read text contrast (1.0:1)");
+
+        // A box with a fill of its own is skipped: the check cannot know what sits behind its text.
+        s.execute("shape.fill", &json!({"color": "#ffffff"})).unwrap();
+        let issues = s.execute("review.accessibility", &json!({})).unwrap();
+        assert!(issues.as_array().unwrap().iter().all(|i| i["shape"] != tb.0), "a filled box is left alone: {issues}");
+    }
+
+    #[test]
+    fn show_from_current_starts_the_show_at_the_open_slide() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.go", &json!({"index": 1})).unwrap();
+        let n = s.doc().unwrap().history.undo.len();
+        s.ui_requests.clear();
+        assert_eq!(s.execute("show.fromCurrent", &json!({})).unwrap(), json!({"from": 1}));
+        assert_eq!(s.ui_requests.len(), 1, "{:?}", s.ui_requests);
+        assert!(matches!(&s.ui_requests[0], UiRequest::StartShow { from: 1 }), "{:?}", s.ui_requests);
+        assert_eq!(s.doc().unwrap().history.undo.len(), n, "starting a show edits nothing");
+
+        // The start of the deck drives "From Beginning" too.
+        s.ui_requests.clear();
+        assert_eq!(s.execute("show.fromStart", &json!({})).unwrap(), json!({"from": 0}));
+    }
 }
 
 #[cfg(test)]

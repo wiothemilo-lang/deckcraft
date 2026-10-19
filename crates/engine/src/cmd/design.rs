@@ -1727,6 +1727,40 @@ mod tests {
         s.execute("design.background", &json!({"copy": true})).unwrap();
         assert_eq!(undo_len(&s), n + 1, "copying an already shared background is not an undo step");
     }
+
+    #[test]
+    fn hide_background_graphics_flips_the_open_slide_and_undoes() {
+        let mut s = Session::with_new();
+        assert!(s.doc().unwrap().doc.slides[0].show_master_shapes, "master graphics show by default");
+        let n = undo_len(&s);
+        assert!(s.execute("design.hideBackgroundGraphics", &json!({"hide": true})).unwrap().is_null());
+        assert!(!s.doc().unwrap().doc.slides[0].show_master_shapes);
+        assert_eq!(undo_len(&s), n + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Hide Background Graphics");
+
+        s.execute("design.hideBackgroundGraphics", &json!({"hide": false})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[0].show_master_shapes);
+        // Setting the value it already has still costs a step: every `s.edit` is one. Pinned as is.
+        let m = undo_len(&s);
+        s.execute("design.hideBackgroundGraphics", &json!({"hide": false})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[0].show_master_shapes);
+        assert_eq!(undo_len(&s), m + 1, "an edit that keeps the value is still a step");
+        s.execute("design.hideBackgroundGraphics", &json!({})).unwrap();
+        assert!(!s.doc().unwrap().doc.slides[0].show_master_shapes, "no `hide` toggles");
+        s.execute("design.hideBackgroundGraphics", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[0].show_master_shapes);
+
+        // Only the open slide changes.
+        s.execute("slide.new", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.slide, 1);
+        s.execute("design.hideBackgroundGraphics", &json!({"hide": true})).unwrap();
+        assert!(!s.doc().unwrap().doc.slides[1].show_master_shapes);
+        assert!(s.doc().unwrap().doc.slides[0].show_master_shapes, "the other slide is untouched");
+
+        // The flag is undoable like any other change.
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[1].show_master_shapes);
+    }
 }
 
 #[cfg(test)]

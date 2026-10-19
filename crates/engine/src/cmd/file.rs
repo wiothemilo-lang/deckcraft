@@ -705,3 +705,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+#[path = "file_render_tests.rs"]
+mod file_render_tests;
