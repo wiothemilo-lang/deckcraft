@@ -51,7 +51,7 @@ impl Imp<'_> {
         }
         let data = self.pkg.get(part)?.to_vec();
         let name = opc::file_of(self.pkg.original_name(part).unwrap_or(part)).to_string();
-        let content_type = self.pkg.content_type(part).filter(|c| !c.is_empty()).unwrap_or_else(|| crate::mime_for(&name).to_string());
+        let content_type = self.pkg.content_type(part).filter(|c| !c.is_empty()).unwrap_or_else(|| crate::media::mime_for(&name).to_string());
         let id = MediaId(self.alloc());
         self.media.push(MediaItem { id, name, content_type, data: Arc::new(data), link: None });
         self.media_by_part.insert(key, id);
@@ -64,7 +64,7 @@ impl Imp<'_> {
         }
         let id = MediaId(self.alloc());
         let name = url.rsplit('/').next().unwrap_or(url).to_string();
-        let content_type = crate::mime_for(&name).to_string();
+        let content_type = crate::media::mime_for(&name).to_string();
         self.media.push(MediaItem { id, name, content_type, data: Arc::new(vec![]), link: Some(url.to_string()) });
         id
     }

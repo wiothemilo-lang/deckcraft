@@ -11,6 +11,7 @@ mod cfb;
 mod custgeom;
 mod dgm;
 mod maps;
+mod media;
 mod opc;
 mod png;
 pub(crate) mod read;
@@ -82,37 +83,6 @@ pub fn export_as(p: &Presentation, ext: &str) -> Result<Vec<u8>, PptxError> {
         _ => write::CT_PRES,
     };
     write::export(p, ct)
-}
-
-/// Content type for a file name's extension.
-pub(crate) fn mime_for(name: &str) -> &'static str {
-    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" | "jpe" => "image/jpeg",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        "tif" | "tiff" => "image/tiff",
-        "svg" => "image/svg+xml",
-        "emf" => "image/x-emf",
-        "wmf" => "image/x-wmf",
-        "webp" => "image/webp",
-        "mp4" | "m4v" => "video/mp4",
-        "mov" => "video/quicktime",
-        "wmv" => "video/x-ms-wmv",
-        "avi" => "video/x-msvideo",
-        "webm" => "video/webm",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "m4a" => "audio/mp4",
-        "wma" => "audio/x-ms-wma",
-        "ogg" => "audio/ogg",
-        "flac" => "audio/flac",
-        "glb" => "model/gltf-binary",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "fntdata" => "application/x-fontdata",
-        _ => "application/octet-stream",
-    }
 }
 
 #[cfg(test)]

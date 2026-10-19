@@ -734,7 +734,7 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
         }
         *n_kept += 1;
         let new = kept_name(&p.name, *n_kept);
-        let ct = if !p.content_type.is_empty() { p.content_type.clone() } else { crate::mime_for(&p.name).to_string() };
+        let ct = if !p.content_type.is_empty() { p.content_type.clone() } else { crate::media::mime_for(&p.name).to_string() };
         // An override per part: a kept part never sets the package-wide default for its extension.
         pkg.xml_part(&new, &ct, p.bytes.clone());
         names.insert(key, new);
