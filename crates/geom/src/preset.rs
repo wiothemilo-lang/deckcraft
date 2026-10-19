@@ -708,6 +708,16 @@ fn simple(path: BezPath, text: Rect, w: f64, h: f64) -> Geometry {
     Geometry { paths: vec![fill(path)], text_rect: text, handles: vec![], sites: mid_sites(w, h) }
 }
 
+/// Everything `build` needs beyond the preset name: the box, its shorter side, and the
+/// adjust-value reader (`a(i)`, which falls back to the preset's defaults).
+struct Ctx<'a> {
+    w: f64,
+    h: f64,
+    ss: f64,
+    full: Rect,
+    a: &'a dyn Fn(usize) -> f64,
+}
+
 /// Builds the geometry for preset `name` at size `w`×`h` with adjust values `adj` (missing
 /// values use the preset's defaults). Unknown names return `None`; the caller falls back to `rect`.
 pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
@@ -721,10 +731,26 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
         let v = adj.get(i).copied().or_else(|| defaults.get(i).copied()).unwrap_or(0.0);
         if v.is_finite() { v } else { 0.0 }
     };
-    let ss = w.min(h);
-    let full = Rect::new(0.0, 0.0, w, h);
-    let mut b = Pb::new();
-    let g = match name {
+    let c = Ctx { w, h, ss: w.min(h), full: Rect::new(0.0, 0.0, w, h), a: &a };
+    build_rects(name, &c)
+        .or_else(|| build_basic(name, &c))
+        .or_else(|| build_3d(name, &c))
+        .or_else(|| build_circular(name, &c))
+        .or_else(|| build_symbols(name, &c))
+        .or_else(|| build_brackets(name, &c))
+        .or_else(|| build_arrows(name, &c))
+        .or_else(|| build_equations(name, &c))
+        .or_else(|| build_flowchart(name, &c))
+        .or_else(|| build_stars(name, &c))
+        .or_else(|| build_ribbons(name, &c))
+        .or_else(|| build_callouts(name, &c))
+        .or_else(|| build_connectors(name, &c))
+        .or_else(|| extra::build(name, w, h, &a))
+}
+
+fn build_rects(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    Some(match name {
         "rect" | "textBox" | "flowChartProcess" => simple(corner_rect(w, h, [Corner::Square; 4]), full, w, h),
         "actionButtonBlank"
         | "actionButtonBackPrevious"
@@ -792,6 +818,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
                 h,
             )
         }
+        _ => return None,
+    })
+}
+
+fn build_basic(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "ellipse" | "flowChartConnector" => {
             let mut g =
                 simple(b.ellipse(w / 2.0, h / 2.0, w / 2.0, h / 2.0).take(), Rect::new(w * 0.14645, h * 0.14645, w * 0.85355, h * 0.85355), w, h);
@@ -953,6 +987,13 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             g.handles.push(Handle::new(0, Point::ZERO, Vec2::new(ss / 100000.0, 0.0), v, 0.0, 50000.0));
             g
         }
+        _ => return None,
+    })
+}
+
+fn build_3d(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    Some(match name {
         "can" | "flowChartMagneticDisk" => {
             // The disk's ends are a third of its height (ECMA-376: ellipses of radius h/6).
             let v = if name == "can" { a(0).clamp(0.0, 50000.0 * h / ss.max(1e-9)) } else { 100000.0 / 3.0 * h / ss.max(1e-9) };
@@ -1021,6 +1062,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             g.handles.push(Handle::new(0, Point::ZERO, Vec2::new(ss / 100000.0, 0.0), v, 0.0, 50000.0));
             g
         }
+        _ => return None,
+    })
+}
+
+fn build_circular(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "donut" => {
             let v = a(0).clamp(0.0, 50000.0);
             let t = ss * v / 100000.0;
@@ -1133,6 +1182,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
                 sites: mid_sites(w, h),
             }
         }
+        _ => return None,
+    })
+}
+
+fn build_symbols(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, a) = (c.w, c.h, c.ss, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "smileyFace" => {
             let k = a(0).clamp(-4653.0, 4653.0) / 100000.0;
             let face = Pb::new().ellipse(w / 2.0, h / 2.0, w / 2.0, h / 2.0).take();
@@ -1239,6 +1296,13 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             simple(b.take(), Rect::new(g12 * w / ssf, h / 2.0 - dy4, g0w, h / 2.0 + dy4), w, h)
         }
         "cloud" | "cloudCallout" => cloud(name, w, h, a(0), a(1)),
+        _ => return None,
+    })
+}
+
+fn build_brackets(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    Some(match name {
         "bracketPair" => {
             let r = ss * a(0).clamp(0.0, 50000.0) / 1e5;
             let mut l = Pb::new();
@@ -1294,6 +1358,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             area.close_path();
             Geometry { paths: vec![fill_only(area), stroke_only(path)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
         }
+        _ => return None,
+    })
+}
+
+fn build_arrows(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "rightArrow" => arrow(Dir::Right, w, h, a(0), a(1)),
         "leftArrow" => arrow(Dir::Left, w, h, a(0), a(1)),
         "upArrow" => arrow(Dir::Up, w, h, a(0), a(1)),
@@ -1513,7 +1585,22 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             let tr = orient(d, w, h, &[(0.0, 0.0), (boxl, t)]);
             simple(b.poly(&pts).take(), Rect::from_points(Point::new(tr[0].0, tr[0].1), Point::new(tr[1].0, tr[1].1)).abs(), w, h)
         }
+        _ => return None,
+    })
+}
+
+fn build_equations(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, a) = (c.w, c.h, c.a);
+    Some(match name {
         "mathPlus" | "mathMinus" | "mathEqual" | "mathDivide" | "mathMultiply" | "mathNotEqual" => math(name, w, h, a(0), a(1), a(2)),
+        _ => return None,
+    })
+}
+
+fn build_flowchart(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h) = (c.w, c.h);
+    let mut b = Pb::new();
+    Some(match name {
         "flowChartPredefinedProcess" => {
             let r = Pb::new().poly(&[(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)]).take();
             let mut l = Pb::new();
@@ -1641,6 +1728,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             b.m(0.0, h / 2.0).l(rx, 0.0).l(w - rx, 0.0).arc(rx, h / 2.0, 270.0, 180.0).l(rx, h).z();
             simple(b.take(), Rect::new(rx, 0.0, w - rx, h), w, h)
         }
+        _ => return None,
+    })
+}
+
+fn build_stars(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "star4" | "star5" | "star6" | "star7" | "star8" | "star10" | "star12" | "star16" | "star24" | "star32" => {
             let n: usize = name.trim_start_matches("star").parse().unwrap_or(5);
             let v = a(0).clamp(0.0, 50000.0);
@@ -1722,6 +1817,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             );
             simple(b.poly(&pts).take(), Rect::new(w * 5372.0 / 21600.0, h * 6382.0 / 21600.0, w * 14640.0 / 21600.0, h * 15935.0 / 21600.0), w, h)
         }
+        _ => return None,
+    })
+}
+
+fn build_ribbons(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, a) = (c.w, c.h, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "ribbon" | "ribbon2" => ribbon(name == "ribbon2", w, h, a(0), a(1)),
         "verticalScroll" | "horizontalScroll" => scroll(name == "verticalScroll", w, h, a(0)),
         "wave" | "doubleWave" => {
@@ -1756,6 +1859,14 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             }
             simple(b.take(), Rect::new(x2.max(xl), text_y, xr.min(x10), h - text_y), w, h)
         }
+        _ => return None,
+    })
+}
+
+fn build_callouts(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, ss, full, a) = (c.w, c.h, c.ss, c.full, c.a);
+    let mut b = Pb::new();
+    Some(match name {
         "wedgeRectCallout" | "wedgeRoundRectCallout" => {
             let r = if name == "wedgeRoundRectCallout" { ss * a(2).clamp(0.0, 50000.0) / 1e5 } else { 0.0 };
             wedge_rect(w, h, a(0), a(1), r)
@@ -1785,6 +1896,13 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             let l = Pb::new().m(p1.0, p1.1).l(p2.0, p2.1).take();
             Geometry { paths: vec![fill(r), stroke_only(l)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
         }
+        _ => return None,
+    })
+}
+
+fn build_connectors(name: &str, c: &Ctx<'_>) -> Option<Geometry> {
+    let (w, h, full, a) = (c.w, c.h, c.full, c.a);
+    Some(match name {
         "line" | "straightConnector1" => {
             let l = Pb::new().m(0.0, 0.0).l(w, h).take();
             Geometry { paths: vec![stroke_only(l)], text_rect: full, handles: vec![], sites: vec![Point::ZERO, Point::new(w, h)] }
@@ -1805,9 +1923,8 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             let l = Pb::new().m(0.0, 0.0).c(x / 2.0, 0.0, x, h / 4.0, x, h / 2.0).c(x, h * 0.75, (x + w) / 2.0, h, w, h).take();
             Geometry { paths: vec![stroke_only(l)], text_rect: full, handles: vec![], sites: vec![Point::ZERO, Point::new(w, h)] }
         }
-        _ => return extra::build(name, w, h, &a),
-    };
-    Some(g)
+        _ => return None,
+    })
 }
 
 fn ellipse_sites(w: f64, h: f64) -> Vec<Point> {
