@@ -322,4 +322,35 @@ mod tests {
         assert!((c[1] - 0.25).abs() < 1e-12 && c[0] == 0.0);
         assert_eq!(cover_crop(f64::NAN, 1.0), [0.0; 4]);
     }
+
+    #[test]
+    fn the_ideas_command_lists_the_open_slides_ideas() {
+        let mut s = deck(true);
+        let undo = s.doc().unwrap().history.undo.len();
+        assert_eq!(
+            s.execute("design.ideas", &json!({})).unwrap(),
+            json!([
+                {"id": "fullBleed", "label": "Full-bleed picture, title on a band"},
+                {"id": "pictureLeft", "label": "Picture left, text right"},
+                {"id": "pictureRight", "label": "Picture right, text left"},
+                {"id": "framed", "label": "Framed picture beside the title"},
+            ])
+        );
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo, "the list is a query");
+        assert_eq!(s.execute("design.ideas", &json!({"slide": 9})).unwrap(), json!([]), "a slide that does not exist has no ideas");
+
+        let mut text = deck(false);
+        assert_eq!(
+            text.execute("design.ideas", &json!({})).unwrap(),
+            json!([
+                {"id": "titleColumn", "label": "Title column beside the text"},
+                {"id": "centred", "label": "Centred title over the text"},
+                {"id": "titleBottom", "label": "Text above, title at the foot"},
+            ])
+        );
+
+        // A fresh slide with only its empty placeholders has nothing to arrange.
+        let mut fresh = Session::with_new();
+        assert_eq!(fresh.execute("design.ideas", &json!({})).unwrap(), json!([]));
+    }
 }

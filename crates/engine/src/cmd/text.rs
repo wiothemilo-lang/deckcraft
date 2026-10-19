@@ -1476,3 +1476,7 @@ mod replace_font_tests {
         assert!(s.execute("font.replace", &json!({"from": "Inter"})).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "text_ime_tests.rs"]
+mod text_ime_tests;

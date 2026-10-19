@@ -154,3 +154,7 @@ fn commands(s: &mut Session, p: &Value) -> Result<Value> {
             .collect(),
     ))
 }
+
+#[cfg(test)]
+#[path = "inspect_tests.rs"]
+mod inspect_tests;
