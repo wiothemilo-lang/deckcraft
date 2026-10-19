@@ -25,6 +25,9 @@
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-b7410e?style=flat-square">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20BSD%20%C2%B7%20Web-555?style=flat-square">
+  <a href="https://github.com/wiothemilo-lang/deckcraft/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wiothemilo-lang/deckcraft/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <img alt="MSRV: Rust 1.95" src="https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square&logo=rust">
+  <a href="https://coderabbit.ai"><img alt="Reviewed by CodeRabbit" src="https://img.shields.io/coderabbit/prs/github/wiothemilo-lang/deckcraft?style=flat-square&label=Reviewed%20by%20CodeRabbit&logo=coderabbit"></a>
 </p>
 
 <p align="center">
