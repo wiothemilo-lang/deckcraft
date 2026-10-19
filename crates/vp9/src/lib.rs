@@ -36,7 +36,7 @@ mod tables;
 mod tile;
 mod transform;
 #[rustfmt::skip]
-#[allow(dead_code, clippy::all)]
+#[allow(dead_code)]
 mod transform_gen;
 
 pub use decoder::{DecodeStats, Decoder};
