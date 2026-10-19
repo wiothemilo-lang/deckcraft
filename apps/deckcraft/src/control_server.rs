@@ -1,8 +1,11 @@
 //! Loopback JSON-lines control server: one request per line, one reply per line.
 //! This is the transport the MCP server (`deckcraft-cli mcp --connect`) wraps.
 //!
-//! Every resource a client can hold is bounded ([`Limits`]): simultaneous connections, request
-//! line length, queued requests, and how long a socket may sit idle or blocked on a write.
+//! The server only reads requests: a line that is not a JSON object with a string `method` (an
+//! HTTP request line, a stray `nc`, binary data) gets one error reply and the connection is
+//! closed, so nothing sent after it runs. Every resource a client can hold is bounded
+//! ([`Limits`]): simultaneous connections, request line length, queued requests, and how long a
+//! socket may sit idle or blocked on a write.
 //!
 //! A connection has to present the app's token before it may send anything else: `127.0.0.1` keeps
 //! the channel off the network, but any process on this machine can reach it, and an
@@ -133,6 +136,53 @@ fn read_line(r: &mut impl BufRead, max: usize) -> Line {
     }
 }
 
+/// One request line, parsed.
+enum Parsed {
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
+    Blank,
+    /// Not a request: reply with this error and close the connection.
+    Reject(String),
+}
+
+fn parse(bytes: &[u8]) -> Parsed {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Parsed::Reject("not a control request (invalid UTF-8); closing the connection".into());
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return Parsed::Blank;
+    }
+    if is_http_request_line(text) {
+        return Parsed::Reject("HTTP is not served here: this port takes JSON lines; closing the connection".into());
+    }
+    let msg = match serde_json::from_str::<Value>(text) {
+        Ok(v) => v,
+        Err(e) => return Parsed::Reject(format!("bad JSON ({e}); expected one JSON request object per line; closing the connection")),
+    };
+    let Some(obj) = msg.as_object() else {
+        return Parsed::Reject("not a control request (expected a JSON object); closing the connection".into());
+    };
+    let Some(method) = obj.get("method").and_then(Value::as_str) else {
+        return Parsed::Reject("not a control request (missing string `method`); closing the connection".into());
+    };
+    Parsed::Request {
+        id: obj.get("id").cloned().unwrap_or(Value::Null),
+        method: method.to_string(),
+        params: obj.get("params").cloned().unwrap_or(json!({})),
+    }
+}
+
+/// An HTTP/1 request line (`POST / HTTP/1.1`) or the HTTP/2 preface (`PRI * HTTP/2.0`).
+fn is_http_request_line(text: &str) -> bool {
+    const METHODS: [&str; 10] = ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH", "PRI"];
+    text.split_once(' ').is_some_and(|(method, _)| METHODS.contains(&method))
+        || text.rsplit_once(' ').is_some_and(|(_, version)| version.starts_with("HTTP/"))
+}
+
 fn serve(stream: TcpStream, tx: &SyncSender<ControlRequest>, ctx: &egui::Context, limits: Limits, token: &str) {
     if stream.set_read_timeout(Some(limits.idle_timeout)).is_err() || stream.set_write_timeout(Some(limits.write_timeout)).is_err() {
         return;
@@ -151,24 +201,14 @@ fn serve(stream: TcpStream, tx: &SyncSender<ControlRequest>, ctx: &egui::Context
             }
             Line::Closed => break,
         };
-        let Ok(line) = String::from_utf8(line) else {
-            if writeln!(out, "{}", json!({"ok": false, "error": "bad JSON: not UTF-8"})).is_err() {
+        let reply = match parse(&line) {
+            Parsed::Blank => continue,
+            Parsed::Reject(e) => {
+                // The connection closes either way; a peer that can't read the reason loses nothing.
+                let _ = writeln!(out, "{}", json!({"ok": false, "error": e}));
                 break;
             }
-            continue;
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        // Set when this request ends the connection, which a refused handshake does: the peer has
-        // to start over with the token rather than keep guessing on the same socket.
-        let mut close = false;
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => {
-                let req_id = msg.get("id").cloned().unwrap_or(Value::Null);
-                let method = msg.get("method").and_then(Value::as_str).unwrap_or("").to_string();
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-
+            Parsed::Request { id, method, params } => {
                 if !authenticated {
                     // Answered here rather than queued, so an unauthenticated peer can neither
                     // run a method nor keep the app's request queue full.
@@ -178,7 +218,6 @@ fn serve(stream: TcpStream, tx: &SyncSender<ControlRequest>, ctx: &egui::Context
                         json!({"ok": true, "result": HELLO})
                     } else {
                         // Neither the reply nor the log may repeat the token that was offered.
-                        close = true;
                         if method == HELLO {
                             log::warn!("control server refused a handshake: wrong token");
                             json!({"ok": false, "error": "unauthorized: wrong control token"})
@@ -187,7 +226,13 @@ fn serve(stream: TcpStream, tx: &SyncSender<ControlRequest>, ctx: &egui::Context
                         }
                     };
                     if let Some(o) = r.as_object_mut() {
-                        o.insert("id".into(), req_id);
+                        o.insert("id".into(), id);
+                    }
+                    if !authenticated {
+                        // A refused handshake ends the connection: the peer has to start over with
+                        // the token rather than keep guessing on the same socket.
+                        let _ = writeln!(out, "{r}");
+                        break;
                     }
                     r
                 } else {
@@ -214,20 +259,16 @@ fn serve(stream: TcpStream, tx: &SyncSender<ControlRequest>, ctx: &egui::Context
                         Err(TrySendError::Disconnected(_)) => break,
                     };
                     if let Some(o) = r.as_object_mut() {
-                        o.insert("id".into(), req_id);
+                        o.insert("id".into(), id);
                     }
                     r
                 }
             }
-            Err(e) => json!({"ok": false, "error": format!("bad JSON: {e}")}),
         };
         if let Err(e) = writeln!(out, "{reply}") {
             if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) {
                 log::debug!("control client stopped reading replies; closing");
             }
-            break;
-        }
-        if close {
             break;
         }
     }
@@ -347,8 +388,8 @@ mod tests {
         assert!(reply(&mut r).unwrap()["error"].as_str().unwrap().contains("unauthorized"));
     }
 
-    /// The handshake is answered by the transport, so it costs the app's request queue nothing —
-    /// which is what stops an unauthenticated peer from filling it.
+    /// The handshake is answered by the transport, so it costs the app's request queue nothing:
+    /// that is what stops an unauthenticated peer from filling it.
     #[test]
     fn the_handshake_does_not_reach_the_ui_queue() {
         let (addr, rx) = server(small());
@@ -357,6 +398,45 @@ mod tests {
         hello(&mut w, TOKEN);
         assert_eq!(reply(&mut r).unwrap()["result"], HELLO);
         assert!(rx.try_recv().is_err(), "the handshake must not be queued for the UI");
+    }
+
+    /// Every reply line until the server closes the connection.
+    fn replies_until_closed(r: &mut BufReader<TcpStream>) -> Vec<Value> {
+        std::iter::from_fn(|| reply(r)).collect()
+    }
+
+    /// A browser can POST to the port: its request line closes the connection before the JSON
+    /// line in its body is read, so nothing is dispatched.
+    #[test]
+    fn an_http_request_closes_the_connection_before_its_body_is_dispatched() {
+        let (addr, rx) = server(Limits { max_line: 512, ..small() });
+        let (mut r, mut w) = client(addr);
+        w.write_all(
+            b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\n\r\n\
+              {\"id\":1,\"method\":\"engine.execute\",\"params\":{\"command\":\"slide.new\"}}\n",
+        )
+        .unwrap();
+        let replies = replies_until_closed(&mut r);
+        assert_eq!(replies.len(), 1, "{replies:?}");
+        assert!(replies[0]["error"].as_str().unwrap().contains("closing the connection"), "{replies:?}");
+        assert!(rx.try_recv().is_err(), "the body was dispatched");
+    }
+
+    #[test]
+    fn a_line_that_is_not_a_request_closes_the_connection() {
+        let (addr, rx) = server(small());
+        ui(rx);
+        for junk in [&b"hello\n"[..], b"[1,2]\n", b"{\"id\":1}\n", b"{\"method\":5}\n", b"\xff\xfe\n", b"GET /x HTTP/1.1\n"] {
+            let (mut r, mut w) = client(addr);
+            w.write_all(junk).unwrap();
+            w.write_all(b"{\"id\":2,\"method\":\"m\"}\n").unwrap();
+            let replies = replies_until_closed(&mut r);
+            assert_eq!(replies.len(), 1, "{replies:?}");
+            assert_eq!(replies[0]["ok"], false);
+        }
+        assert!(is_http_request_line("OPTIONS * HTTP/1.1"));
+        assert!(is_http_request_line("PRI * HTTP/2.0"));
+        assert!(!is_http_request_line("{\"method\":\"GET /\"}"));
     }
 
     #[test]
