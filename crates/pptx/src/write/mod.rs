@@ -78,47 +78,6 @@ impl Out {
     }
 }
 
-fn ext_for(content_type: &str, name: &str, data: &[u8]) -> String {
-    let by_ct = match content_type {
-        "image/png" => "png",
-        "image/jpeg" | "image/jpg" => "jpeg",
-        "image/gif" => "gif",
-        "image/bmp" => "bmp",
-        "image/tiff" => "tiff",
-        "image/svg+xml" => "svg",
-        "image/x-emf" | "image/emf" => "emf",
-        "image/x-wmf" | "image/wmf" => "wmf",
-        "image/webp" => "webp",
-        "video/mp4" => "mp4",
-        "video/quicktime" => "mov",
-        "video/x-ms-wmv" => "wmv",
-        "video/x-msvideo" => "avi",
-        "video/webm" => "webm",
-        "audio/mpeg" => "mp3",
-        "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
-        "audio/mp4" | "audio/x-m4a" => "m4a",
-        "audio/x-ms-wma" => "wma",
-        "audio/ogg" => "ogg",
-        "audio/flac" => "flac",
-        "model/gltf-binary" => "glb",
-        _ => "",
-    };
-    if !by_ct.is_empty() {
-        return by_ct.to_string();
-    }
-    if data.starts_with(b"\x89PNG") {
-        return "png".into();
-    }
-    if data.starts_with(&[0xFF, 0xD8]) {
-        return "jpeg".into();
-    }
-    if data.starts_with(b"GIF8") {
-        return "gif".into();
-    }
-    let e = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    if !e.is_empty() && e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()) { e } else { "bin".into() }
-}
-
 impl Exp<'_> {
     fn media_part(&mut self, id: MediaId) -> Option<String> {
         if let Some(p) = self.media_parts.get(&id) {
@@ -128,9 +87,9 @@ impl Exp<'_> {
         if m.data.is_empty() {
             return None;
         }
-        let ext = ext_for(&m.content_type, &m.name, &m.data);
+        let ext = crate::media::ext_for(&m.content_type, &m.name, &m.data);
         let ct = if m.content_type.is_empty() || !m.content_type.contains('/') {
-            crate::mime_for(&format!("x.{ext}")).to_string()
+            crate::media::mime_for(&format!("x.{ext}")).to_string()
         } else {
             m.content_type.clone()
         };
