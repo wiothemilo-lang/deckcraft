@@ -26,6 +26,8 @@ mod transition_fx;
 mod transition_geom;
 
 #[cfg(test)]
+mod bench;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_interact;

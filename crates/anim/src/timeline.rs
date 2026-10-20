@@ -97,11 +97,26 @@ pub struct Timeline {
     main: Vec<StepInfo>,
     triggers: Vec<(ShapeId, Vec<StepInfo>)>,
     /// Base fill colour per shape (for colour emphasis).
-    colors: Vec<(ShapeId, Rgba)>,
+    colors: HashMap<ShapeId, Rgba>,
     /// By-paragraph builds animate first-level paragraphs; deeper paragraphs follow their parent:
     /// (shape, member paragraph, owner paragraph).
     groups: Vec<(ShapeId, usize, usize)>,
+    /// The owner paragraph of each animated paragraph of a by-paragraph build: a paragraph of a
+    /// deeper level plays with the first-level paragraph that holds it.
+    para_owner: HashMap<(ShapeId, usize), usize>,
+    /// The effects of each animated shape and paragraph, as indices into `effects`, in Animation
+    /// Pane order (the `anim` index). The show asks for the state of a shape every frame: the
+    /// index keeps that ask from scanning every effect of the slide, and from allocating.
+    by_shape: HashMap<(ShapeId, Option<usize>), Vec<u32>>,
+    /// The paragraphs of each animated shape that are animated on their own.
+    para_targets: HashMap<ShapeId, Vec<usize>>,
+    /// The shapes that have any effect, in the order they first appear.
+    shapes: Vec<ShapeId>,
 }
+
+/// How many effect indices fit in the stack buffer of the order (the rest go to the heap): a
+/// shape has a handful of effects, and a frame must not allocate.
+const ORDER_ON_STACK: usize = 16;
 
 enum Status {
     NotStarted,
@@ -300,16 +315,56 @@ impl Timeline {
         // Base colours of animated shapes.
         for e in &tl.effects {
             let id = e.timing.shape;
-            if tl.colors.iter().any(|(s, _)| *s == id) {
+            if tl.colors.contains_key(&id) {
                 continue;
             }
             let c = match slide.shape(id).and_then(|s| s.fill.as_ref()) {
                 Some(Fill::Solid { color }) => resolve(color),
                 _ => accent,
             };
-            tl.colors.push((id, c));
+            tl.colors.insert(id, c);
         }
+        tl.index();
         tl
+    }
+
+    /// Index the effects by shape and paragraph, in the order they are played in: the show asks
+    /// for the state of a shape every frame, and must not walk the whole timeline for it.
+    fn index(&mut self) {
+        for (i, e) in self.effects.iter().enumerate() {
+            self.by_shape.entry((e.timing.shape, e.timing.paragraph)).or_default().push(i as u32);
+        }
+        // The Animation Pane order is the order of the animations in the slide's list.
+        let anims: Vec<usize> = self.effects.iter().map(|e| e.timing.anim).collect();
+        for idxs in self.by_shape.values_mut() {
+            idxs.sort_by_key(|&i| anims[i as usize]);
+        }
+        // The paragraphs of a by-paragraph build: the first-level ones are animated, the deeper
+        // ones play with the first-level paragraph that holds them.
+        for (shape, member, owner) in &self.groups {
+            self.para_owner.entry((*shape, *member)).or_insert(*owner);
+        }
+        let mut effect_paras: HashMap<ShapeId, Vec<usize>> = HashMap::new();
+        for e in &self.effects {
+            if let Some(p) = e.timing.paragraph {
+                effect_paras.entry(e.timing.shape).or_default().push(p);
+            }
+        }
+        // The members of a by-paragraph build play with the first-level paragraph that holds
+        // them: they are animated too, on their own.
+        let mut targets = effect_paras.clone();
+        for (shape, member, owner) in &self.groups {
+            if effect_paras.get(shape).is_some_and(|v| v.contains(owner)) {
+                targets.entry(*shape).or_default().push(*member);
+            }
+        }
+        for v in targets.values_mut() {
+            v.sort_unstable();
+            v.dedup();
+        }
+        self.para_targets = targets;
+        let mut seen: HashSet<ShapeId> = HashSet::new();
+        self.shapes = self.effects.iter().map(|e| e.timing.shape).filter(|s| seen.insert(*s)).collect();
     }
 
     /// Number of steps in the main sequence (clicks, plus an automatic first step when the first
@@ -385,22 +440,12 @@ impl Timeline {
 
     /// Paragraph indices of `shape` animated separately (by-paragraph builds).
     pub fn paragraph_targets(&self, shape: ShapeId) -> Vec<usize> {
-        let mut v: Vec<usize> = self.effects.iter().filter(|e| e.timing.shape == shape).filter_map(|e| e.timing.paragraph).collect();
-        v.extend(self.groups.iter().filter(|g| g.0 == shape && v.contains(&g.2)).map(|g| g.1).collect::<Vec<_>>());
-        v.sort_unstable();
-        v.dedup();
-        v
+        self.para_targets.get(&shape).cloned().unwrap_or_default()
     }
 
     /// Shapes with any effect.
     pub fn animated_shapes(&self) -> Vec<ShapeId> {
-        let mut v: Vec<ShapeId> = Vec::new();
-        for e in &self.effects {
-            if !v.contains(&e.timing.shape) {
-                v.push(e.timing.shape);
-            }
-        }
-        v
+        self.shapes.clone()
     }
 
     /// State of `shape` (or of one of its paragraphs, `para`) when `step` main steps have been
@@ -428,29 +473,49 @@ impl Timeline {
         triggers: &[TriggerPlay],
         stamps: &[StepStamp],
     ) -> AnimState {
-        let para = para.map(|p| self.groups.iter().find(|g| g.0 == shape && g.1 == p).map(|g| g.2).unwrap_or(p));
-        let mine = self.effects.iter().filter(|e| e.timing.shape == shape && e.timing.paragraph == para);
-        let base_color = self.colors.iter().find(|(s, _)| *s == shape).map(|(_, c)| *c).unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
+        // A paragraph of a deeper level plays with the first-level paragraph that holds it.
+        let para = para.and_then(|p| self.para_owner.get(&(shape, p)).copied()).or(para);
+        let base_color = self.colors.get(&shape).copied().unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
         let mut st = AnimState::default();
+        let Some(idxs) = self.by_shape.get(&(shape, para)) else { return st.sanitized() };
         // Initial visibility comes from the first effect in the Animation Pane order.
-        let mut ordered: Vec<&Effect> = mine.collect();
-        ordered.sort_by_key(|e| e.timing.anim);
-        if let Some(e0) = ordered.first()
-            && e0.timing.class == AnimClass::Entrance
+        if let Some(&first) = idxs.first()
+            && self.effects[first as usize].timing.class == AnimClass::Entrance
         {
             st.visible = false;
         }
-        // Then play in time order: main sequence first, then triggered sequences as they were clicked.
-        if !stamps.is_empty() {
-            let when = |e: &Effect| match e.timing.sequence {
-                Sequence::Main => 0,
-                Sequence::Trigger(tr) => {
-                    stamps.iter().find(|s| s.trigger == tr && s.step == e.timing.step).map_or(u64::MAX, |s| s.at.saturating_add(1))
-                }
-            };
-            ordered.sort_by_key(|e| (when(e), e.timing.anim));
+        // Then play in time order: main sequence first, then triggered sequences as they were
+        // clicked.
+        if stamps.is_empty() {
+            // The common case: the Animation Pane order, straight from the timeline.
+            return self.play(st, idxs, step, t, triggers, base_color);
         }
-        for e in &ordered {
+        // The show started triggered sequences: the effects play in the order their steps were
+        // started. The order is built in a buffer on the stack: a frame must not allocate.
+        let mut on_stack = [0u32; ORDER_ON_STACK];
+        let mut on_heap: Vec<u32> = Vec::new();
+        let buf: &mut [u32] = if idxs.len() <= ORDER_ON_STACK {
+            &mut on_stack[..idxs.len()]
+        } else {
+            on_heap.resize(idxs.len(), 0);
+            &mut on_heap
+        };
+        buf.copy_from_slice(idxs);
+        let when = |i: u32| match self.effects[i as usize].timing.sequence {
+            Sequence::Main => 0,
+            Sequence::Trigger(tr) => {
+                let step = self.effects[i as usize].timing.step;
+                stamps.iter().find(|s| s.trigger == tr && s.step == step).map_or(u64::MAX, |s| s.at.saturating_add(1))
+            }
+        };
+        buf.sort_by_key(|&i| (when(i), self.effects[i as usize].timing.anim));
+        self.play(st, buf, step, t, triggers, base_color)
+    }
+
+    /// Play the effects of a shape, in the given order, on top of `st`.
+    fn play(&self, mut st: AnimState, order: &[u32], step: usize, t: f64, triggers: &[TriggerPlay], base_color: Rgba) -> AnimState {
+        for &i in order {
+            let e = &self.effects[i as usize];
             let (pstep, pt) = match e.timing.sequence {
                 Sequence::Main => (step, t),
                 Sequence::Trigger(tr) => triggers.iter().find(|p| p.trigger == tr).map(|p| (p.step, p.t)).unwrap_or((0, 0.0)),
@@ -486,11 +551,47 @@ impl Timeline {
         }
         st.sanitized()
     }
-
     /// State on the "play everything" clock (Animation Pane ▸ Play All, preview).
     pub fn state_at(&self, shape: ShapeId, para: Option<usize>, time: f64) -> AnimState {
         let (s, t) = self.locate(time);
         self.state(shape, para, s, t)
+    }
+
+    /// The state as it was computed before the timeline grew its index: the effects of the
+    /// shape are collected by scanning the whole timeline and sorted, every call. The test
+    /// below holds the two to the same answer.
+    #[cfg(test)]
+    pub(crate) fn state_ordered_reference(
+        &self,
+        shape: ShapeId,
+        para: Option<usize>,
+        step: usize,
+        t: f64,
+        triggers: &[TriggerPlay],
+        stamps: &[StepStamp],
+    ) -> AnimState {
+        let para = para.map(|p| self.groups.iter().find(|g| g.0 == shape && g.1 == p).map(|g| g.2).unwrap_or(p));
+        let base_color = self.colors.get(&shape).copied().unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
+        let mut idxs: Vec<u32> =
+            self.effects.iter().enumerate().filter(|(_, e)| e.timing.shape == shape && e.timing.paragraph == para).map(|(i, _)| i as u32).collect();
+        idxs.sort_by_key(|&i| self.effects[i as usize].timing.anim);
+        let mut st = AnimState::default();
+        if let Some(&first) = idxs.first()
+            && self.effects[first as usize].timing.class == AnimClass::Entrance
+        {
+            st.visible = false;
+        }
+        if !stamps.is_empty() {
+            let when = |i: u32| match self.effects[i as usize].timing.sequence {
+                Sequence::Main => 0,
+                Sequence::Trigger(tr) => {
+                    let step = self.effects[i as usize].timing.step;
+                    stamps.iter().find(|s| s.trigger == tr && s.step == step).map_or(u64::MAX, |s| s.at.saturating_add(1))
+                }
+            };
+            idxs.sort_by_key(|&i| (when(i), self.effects[i as usize].timing.anim));
+        }
+        self.play(st, &idxs, step, t, triggers, base_color)
     }
 }
 

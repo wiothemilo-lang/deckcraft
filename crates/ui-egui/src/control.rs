@@ -77,12 +77,18 @@ fn wrap(r: Result<Value, String>) -> Outcome {
     }
 }
 
-pub fn all_commands(app: &SlideApp) -> Value {
-    let mut v: Vec<Value> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
+/// The engine's and the interface's commands, with their enablement: what `engine.commands`
+/// answers. A command that cannot be serialized is an error the caller learns about, not a
+/// `null` in the list (which would read as a command without an id).
+pub fn all_commands(app: &SlideApp) -> Result<Value, String> {
+    let mut v: Vec<Value> = Vec::new();
+    for c in app.session.commands() {
+        v.push(serde_json::to_value(c).map_err(|e| format!("a command does not serialize: {e}"))?);
+    }
     for (id, label, sc, params) in crate::UI_COMMANDS {
         v.push(json!({"id": id, "label": label, "shortcut": sc, "params": params, "enabled": true, "ui": true}));
     }
-    Value::Array(v)
+    Ok(Value::Array(v))
 }
 
 pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
@@ -141,7 +147,7 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
             let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
             wrap(app.run(id, params))
         }
-        "engine.commands" => ok(all_commands(app)),
+        "engine.commands" => wrap(all_commands(app)),
         "document.inspect" => wrap(app.run("document.inspect", json!({}))),
         "ui.inspect" => ok(inspect(app, ctx)),
         "ui.pointer" => {
@@ -443,5 +449,18 @@ mod tests {
         assert!(ControlRequest::abandon(&req.state), "a pending request is abandoned");
         assert!(!req.take(), "an abandoned request is never taken");
         assert!(ControlRequest::abandon(&req.state), "abandoning twice stays abandoned");
+    }
+
+    /// `engine.commands` answers with the commands themselves: one that does not serialize is
+    /// an error, not a `null` among the commands (which would read as a command without an id).
+    #[test]
+    fn all_commands_lists_commands_with_their_ids() {
+        let app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
+        let v = all_commands(&app).expect("the commands serialize");
+        let list = v.as_array().expect("a list of commands");
+        assert!(!list.is_empty());
+        assert!(list.iter().all(|c| c.get("id").and_then(|i| i.as_str()).is_some()), "every command has an id");
+        assert!(list.iter().any(|c| c["id"] == "slide.new"), "the engine's commands are there");
+        assert!(list.iter().any(|c| c.get("ui").is_some()), "the interface's commands are there");
     }
 }
