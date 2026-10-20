@@ -65,6 +65,18 @@ struct Manifest {
 
 /// Serialize a presentation.
 pub fn save(p: &Presentation) -> Result<Vec<u8>> {
+    save_as(p, MIMETYPE, FORMAT_NAME)
+}
+
+/// Serialize a presentation in the container written before the SlideCraft to DeckCraft rename:
+/// the same file, with the old `mimetype` and the old format name in its manifest. A file that
+/// keeps its `.slidecraft` name then keeps the content that name promises, and DeckCraft reads
+/// it back like any other deck.
+pub fn save_legacy(p: &Presentation) -> Result<Vec<u8>> {
+    save_as(p, LEGACY_MIMETYPE, LEGACY_FORMAT_NAME)
+}
+
+fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8>> {
     let mut buf = Cursor::new(Vec::new());
     {
         let mut z = zip::ZipWriter::new(&mut buf);
@@ -72,9 +84,9 @@ pub fn save(p: &Presentation) -> Result<Vec<u8>> {
         let deflate = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let w = |e: zip::result::ZipError| FormatError::Write(e.to_string());
         z.start_file("mimetype", stored).map_err(w)?;
-        z.write_all(MIMETYPE.as_bytes()).map_err(|e| FormatError::Write(e.to_string()))?;
+        z.write_all(mimetype.as_bytes()).map_err(|e| FormatError::Write(e.to_string()))?;
         let m = Manifest {
-            format: FORMAT_NAME.into(),
+            format: format_name.into(),
             version: VERSION,
             generator: format!("DeckCraft {}", env!("CARGO_PKG_VERSION")),
             presentation: p.clone(),

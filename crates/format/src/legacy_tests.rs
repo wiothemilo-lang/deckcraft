@@ -102,6 +102,18 @@ fn only_our_manifest_names_are_read() {
 }
 
 #[test]
+fn a_legacy_file_saves_as_a_legacy_one() {
+    let p = Presentation::default();
+    let bytes = save_legacy(&p).unwrap_or_else(|e| panic!("{e}"));
+    // The file keeps the old names, so the name it is saved under matches what it holds.
+    assert!(sniff(&bytes));
+    let mut z = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).expect("the package opens");
+    assert_eq!(read_entry(&mut z, "mimetype").unwrap(), LEGACY_MIMETYPE.as_bytes());
+    assert_eq!(manifest_of(&bytes)["format"], LEGACY_FORMAT_NAME);
+    assert!(load(&bytes).is_ok());
+}
+
+#[test]
 fn sniff_and_load_agree_on_a_legacy_file() {
     // The legacy mimetype is what a name-based filter sees, and the manifest's name is what
     // the loader reads: the two must accept the same file.
