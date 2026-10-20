@@ -5,7 +5,7 @@
 use deckcraft_anim::{Layer, Source, layer_mesh, transition_frame, uses_slide_parts};
 use deckcraft_model::{Presentation, ShapeId};
 
-use crate::{Image, RenderOpts, ShapeState, SlidePart, render_blend, render_slide};
+use crate::{Image, RenderOpts, ShapeState, SlidePart, render_blend, render_slide, render_slide_part};
 
 /// The two slides of a transition rendered as background and content, for the transitions that
 /// move contents over the backgrounds ([`deckcraft_anim::uses_slide_parts`]). `None` parts of the
@@ -21,14 +21,11 @@ pub struct SlideParts {
 impl SlideParts {
     /// Render the parts of slides `old` and `new`.
     pub fn render(pres: &Presentation, old: Option<usize>, new: usize, opts: &RenderOpts) -> SlideParts {
-        // The two parts of a slide share the filter check (it walks the slide): ask once.
-        let filters = |i: usize| pres.slides.get(i).is_some_and(|s| crate::needs_filters(pres, s));
-        let draw = |i: usize, part: SlidePart| crate::render_slide_part_with(pres, i, part, opts, Some(filters(i)));
         SlideParts {
-            old_back: old.map(|i| draw(i, SlidePart::Backdrop)),
-            old_content: old.map(|i| draw(i, SlidePart::Content)),
-            new_back: draw(new, SlidePart::Backdrop),
-            new_content: draw(new, SlidePart::Content),
+            old_back: old.map(|i| render_slide_part(pres, i, SlidePart::Backdrop, opts)),
+            old_content: old.map(|i| render_slide_part(pres, i, SlidePart::Content, opts)),
+            new_back: render_slide_part(pres, new, SlidePart::Backdrop, opts),
+            new_content: render_slide_part(pres, new, SlidePart::Content, opts),
         }
     }
 }

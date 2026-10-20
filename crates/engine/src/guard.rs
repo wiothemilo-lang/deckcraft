@@ -37,8 +37,22 @@ impl Session {
     pub(crate) fn guarded(&mut self, id: &str, f: impl FnOnce(&mut Session) -> Result<Value>) -> Result<Value> {
         let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone(), d.revision));
         let depth = self.depth;
+        // What the command changes outside the presentation: the UI requests it sends, the
+        // clipboard it fills, the painters it arms, the tool it leaves in a state. The guard owns
+        // the snapshot, so both ways a command can fail — an error and a panic — put them back.
+        // (Only the outermost command: a command run by a command is part of its edit.)
+        let outside = if depth == 0 { Some(self.outside()) } else { None };
         match catch_unwind(AssertUnwindSafe(|| f(self))) {
-            Ok(r) => r,
+            Ok(r) => {
+                // A command that failed leaves nothing behind but its error: the UI must not open
+                // a dialog for an edit that never happened.
+                if r.is_err()
+                    && let Some(saved) = outside
+                {
+                    self.restore_outside(saved);
+                }
+                r
+            }
             Err(payload) => {
                 self.depth = depth;
                 let msg = panic_message(payload.as_ref());
@@ -50,6 +64,11 @@ impl Session {
                     st.selection = selection;
                     st.interaction = None;
                     st.revision = revision.max(st.revision).saturating_add(1);
+                }
+                // And the same outside the presentation: a command that panicked half way may
+                // have asked the UI for a dialog or filled the clipboard.
+                if let Some(saved) = outside {
+                    self.restore_outside(saved);
                 }
                 log::error!("command `{id}` panicked: {msg}");
                 self.panics_caught = self.panics_caught.saturating_add(1);
@@ -89,6 +108,23 @@ mod tests {
         assert_eq!(s.panics_caught, 1, "the guard counts what it caught");
         // The session keeps working.
         s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [36, 236, 200, 400]})).unwrap();
+    }
+
+    #[test]
+    fn a_panicking_command_leaves_no_trace_outside_the_presentation() {
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        // A command that asks the UI for a dialog and fills the clipboard, then panics.
+        let err = s
+            .guarded("test.panic", |s| {
+                s.ui_requests.push(crate::UiRequest::Dialog { id: "test".into(), params: serde_json::Value::Null });
+                s.clipboard = crate::Clipboard { plain: "test".into(), ..Default::default() };
+                panic!("boom");
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("boom"), "{err}");
+        assert!(s.ui_requests.is_empty(), "the dialog request is gone: {:?}", s.ui_requests);
+        assert!(s.clipboard.plain.is_empty(), "the clipboard is as it was: {:?}", s.clipboard.plain);
     }
 
     #[test]
