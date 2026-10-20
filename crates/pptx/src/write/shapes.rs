@@ -446,7 +446,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             }
             w.close("p:grpSp");
         }
-        ShapeKind::Opaque { xml, preview, label, parts } => opaque(w, x, o, cx, s, xml, *preview, label, parts),
+        ShapeKind::Opaque { xml, preview, label, parts, rels } => opaque(w, x, o, cx, s, xml, *preview, label, parts, rels),
     }
 }
 
@@ -850,10 +850,13 @@ fn opaque(
     preview: Option<deckcraft_model::MediaId>,
     label: &str,
     parts: &[(String, String, deckcraft_model::MediaId)],
+    rels: &[deckcraft_model::OpaqueRel],
 ) {
     // Kept XML is written back as it was when every part it references was kept too, with those
     // parts re-added under this slide's relationship ids.
-    if let Ok(doc) = crate::xml::parse(xml.as_bytes()) {
+    if let Ok(doc) = crate::xml::parse(xml.as_bytes())
+        && x.opaque_rels(rels)
+    {
         if doc.root.is("AlternateContent") {
             // A kept `mc:AlternateContent`: both branches go back, so a choice we could not read
             // is not lost.

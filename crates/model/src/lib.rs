@@ -281,6 +281,20 @@ pub fn ink_sample_width(pen: f64, pressure: f32, legacy: bool) -> f64 {
     pen * f64::from(p)
 }
 
+/// One relationship between package parts retained by an opaque object. Both ends use ordinary
+/// media ids, so native saves, media cleanup and cross-document copies preserve the graph.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpaqueRel {
+    /// The part whose XML uses `id`.
+    pub source: MediaId,
+    pub id: String,
+    /// Full OPC relationship type URI.
+    pub rel_type: String,
+    /// Embedded part or external-link media item; external targets are never fetched.
+    pub target: MediaId,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ShapeKind {
@@ -321,6 +335,9 @@ pub enum ShapeKind {
         /// back: (relationship id used in `xml`, relationship type, the part as a media item).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         parts: Vec<(String, String, MediaId)>,
+        /// Relationships of those parts and their dependencies; bytes stay in the media store.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rels: Vec<OpaqueRel>,
     },
 }
 

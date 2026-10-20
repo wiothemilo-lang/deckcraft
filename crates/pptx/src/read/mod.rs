@@ -3,6 +3,7 @@
 pub(crate) mod chart;
 mod chartex;
 pub(crate) mod dml;
+mod opaque;
 mod shapes;
 mod theme;
 mod timing;
@@ -29,6 +30,8 @@ pub struct Imp<'a> {
     pub pkg: &'a Package,
     pub media: Vec<MediaItem>,
     pub media_by_part: HashMap<String, MediaId>,
+    /// Import-wide cap on opaque relationship copies, including repeated uses of a shared part.
+    pub opaque_rels_read: usize,
     pub next: u32,
     pub slide_by_part: HashMap<String, SlideId>,
     pub custom_show_names: HashMap<String, String>,
@@ -400,6 +403,7 @@ pub fn import_theme(bytes: &[u8]) -> Result<(deckcraft_model::theme::Theme, Vec<
         pkg: &pkg,
         media: vec![],
         media_by_part: HashMap::new(),
+        opaque_rels_read: 0,
         next: 0,
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
@@ -469,6 +473,7 @@ pub fn import_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>), PptxE
         media: vec![],
         media_by_part: HashMap::new(),
         next: max_id.max(1),
+        opaque_rels_read: 0,
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
         table_style_ids: Vec::new(),

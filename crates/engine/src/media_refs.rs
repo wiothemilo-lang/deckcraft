@@ -165,13 +165,17 @@ macro_rules! walkers {
                     }
                 }
                 // Every field named, so a new one can't slip past.
-                ShapeKind::Opaque { xml: _, preview, label: _, parts } => {
+                ShapeKind::Opaque { xml: _, preview, label: _, parts, rels } => {
                     if let Some(p) = preview {
                         f(p);
                     }
                     // SmartArt data, OLE embeddings… kept as media items (#209).
                     for (_, _, id) in parts {
                         f(id);
+                    }
+                    for rel in rels {
+                        f(&$($m)? rel.source);
+                        f(&$($m)? rel.target);
                     }
                 }
             }
@@ -403,9 +407,20 @@ mod tests {
                 preview: Some(MediaId(9101)),
                 label: "object".into(),
                 parts: vec![("rId2".into(), "oleObject".into(), MediaId(9102))],
+                rels: vec![deckcraft_model::OpaqueRel {
+                    source: MediaId(9102),
+                    id: "rIdImage".into(),
+                    rel_type: "image".into(),
+                    target: MediaId(9103),
+                }],
             },
             ..Default::default()
         };
-        assert_eq!(shapes_media(std::slice::from_ref(&opaque)), vec![MediaId(9101), MediaId(9102)]);
+        assert_eq!(shapes_media(std::slice::from_ref(&opaque)), vec![MediaId(9101), MediaId(9102), MediaId(9103)]);
+        let mut copied = opaque;
+        visit_mut::shape(&mut copied, &mut |id| id.0 += 100);
+        let ShapeKind::Opaque { parts, rels, .. } = &copied.kind else { panic!("opaque") };
+        assert_eq!(parts[0].2, MediaId(9202));
+        assert_eq!((rels[0].source, rels[0].target), (MediaId(9202), MediaId(9203)));
     }
 }
