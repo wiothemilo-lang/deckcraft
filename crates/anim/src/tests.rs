@@ -391,7 +391,7 @@ fn malformed_paths_dont_panic() {
         "M 0 0 Q",
         "--..ee",
         "M 0 0 H 1 V 1 h -1 v -1",
-        "😀 M 1 1",
+        "ðŸ˜€ M 1 1",
         "M 0 0 L 0.5 0.5 X 9 9",
     ] {
         let p = MotionPath::parse(s);
@@ -901,7 +901,7 @@ fn show_follows_links() {
 }
 
 /// #420: late in the Honeycomb every cell has settled, so the incoming hexagons must cover the
-/// whole slide — the old row count stopped at ~75% of a 16:9 slide and left the bottom black.
+/// whole slide â€” the old row count stopped at ~75% of a 16:9 slide and left the bottom black.
 #[test]
 fn honeycomb_cells_reach_the_bottom_before_the_slide_ends() {
     let sign = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
@@ -1036,7 +1036,7 @@ fn show_returns_to_the_zoom_slide() {
         stop_sound: false,
     };
     let mut s = ShowState::new(&p);
-    // A section zoom on slide 0 for slides 2–3.
+    // A section zoom on slide 0 for slides 2â€“3.
     assert_eq!(s.follow_link(&p, &link(2, Some(3)), None), LinkJump::Show(ShowAction::Slide(2)));
     assert_eq!(s.next(&p), ShowAction::Slide(3));
     assert_eq!(s.next(&p), ShowAction::Slide(0), "back to the zoom");
@@ -1051,4 +1051,43 @@ fn show_returns_to_the_zoom_slide() {
     s.follow_link(&p, &link(2, Some(2)), None);
     s.goto(&p, 4);
     assert_eq!(s.next(&p), ShowAction::Slide(5));
+}
+
+/// The timeline grew an index of its effects (the show asks for the state of a shape every
+/// frame): the answer must not change. The reference is the old way of finding the effects of
+/// a shape, scanning the whole timeline and sorting it on every call.
+#[test]
+fn the_indexed_timeline_answers_as_the_scanning_one_did() {
+    let mut anims = vec![
+        anim(1, AnimClass::Entrance, "fade", AnimStart::OnClick),
+        anim(2, AnimClass::Entrance, "zoom", AnimStart::WithPrevious),
+        anim(1, AnimClass::Emphasis, "pulse", AnimStart::WithPrevious),
+        anim(3, AnimClass::Exit, "fadeOut", AnimStart::OnClick),
+    ];
+    // A triggered sequence, started later than the main one.
+    let mut trig = anim(2, AnimClass::Entrance, "fly", AnimStart::OnClick);
+    trig.trigger = Some(ShapeId(7));
+    anims.push(trig);
+    let mut trig2 = anim(1, AnimClass::Emphasis, "spin", AnimStart::OnClick);
+    trig2.trigger = Some(ShapeId(7));
+    anims.push(trig2);
+    // A shape that is not animated at all.
+    let slide = Slide { shapes: (1..=4).map(|i| shape(i, &format!("S{i}"))).collect(), animations: anims, ..Default::default() };
+    let tl = Timeline::new(&slide, W, H);
+
+    let plays = [TriggerPlay { trigger: ShapeId(7), step: 0, t: 0.4 }];
+    let stamps = [StepStamp { trigger: ShapeId(7), step: 0, at: 3 }];
+    for shape in [ShapeId(1), ShapeId(2), ShapeId(3), ShapeId(4), ShapeId(9)] {
+        for para in [None, Some(0), Some(1)] {
+            for step in 0..4 {
+                for t in [0.0, 0.25, 1.0, 3.5] {
+                    for (plays, stamps) in [(&[][..], &[][..]), (&plays[..], &[][..]), (&plays[..], &stamps[..])] {
+                        let got = tl.state_ordered(shape, para, step, t, plays, stamps);
+                        let want = tl.state_ordered_reference(shape, para, step, t, plays, stamps);
+                        assert_eq!(got, want, "shape {shape:?} para {para:?} step {step} t {t}");
+                    }
+                }
+            }
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-18 · **Last updated:** 2026-10-18 · **Change:** minor (localization: the catalog, the language setting (#15) and a Vietnamese draft landed; row 5 and its hours narrowed; 2026-10-17: the soak entry no longer claims CI samples long sessions — those runs are `#[ignore]`d; previous: major, community PR wave 2026-10-14: soak tests, PPTX corpus, comment threads (#70), embedded fonts, SmartArt Text Pane, Animation Pane timeline, Hunspell spelling, thesaurus, AutoCorrect, 14 new dialogs, pen pressure and trackpad gestures; duplicated entries and headers folded; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (the animation rewind flag (#77) round-trips, so row 3 is the media playback options (#74) alone, and the entry names what is kept (trim, fades, bookmarks) and what is lost; an entry for the AV1 decoder, the least exercised of the four video codecs; previous: minor, localization: the catalog, the language setting (#15) and a Vietnamese draft landed; row 5 and its hours narrowed; 2026-10-17: the soak entry no longer claims CI samples long sessions — those runs are `#[ignore]`d; previous: major, community PR wave 2026-10-14: soak tests, PPTX corpus, comment threads (#70), embedded fonts, SmartArt Text Pane, Animation Pane timeline, Hunspell spelling, thesaurus, AutoCorrect, 14 new dialogs, pen pressure and trackpad gestures; duplicated entries and headers folded; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -19,7 +19,7 @@ revision history.
 |---|---|---|:-:|---|---|
 | 1 | PPTX corpus is only decks we author (no PowerPoint reference renders) | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
 | 2 | Data loss and crashes on common paths (#60, #40, #59) | Stability | B | 6–12 | this file |
-| 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
+| 3 | PPTX round trip drops media playback options (#74) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 5 | Localization: a Vietnamese draft plus 5 beta languages and native review | Localization | B (5 languages) | 40–73 | [localization-parity.md](localization-parity.md) |
 | 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
@@ -84,18 +84,22 @@ Detail in [file-format-parity.md](file-format-parity.md).
   repeat, bounce end and triggers). Losses these checks found are fixed: notes- and handout-master
   text, paragraph default run properties (`defRPr`, including a link), action sounds, a run's
   inner shadow, reflection and soft edge, a bevel preset with no kept `sp3d`, and text Mouse Over
-  actions. Still open: media options (#74), animation rewind (#77) and a corpus of decks from
-  outside this repo.
+  actions. Still open: media playback options (#74) and a corpus of decks from
+  outside this repo. The animation rewind flag (#77) round-trips since 2026-10-13.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
   `standards/test-corpora.md`), add render checks, have the owner open outputs in PowerPoint, fix
   what breaks. **Beta blocker.**
 
-### Round trip loses media playback options and animation rewind (#74, #77)
-- **Evidence:** issues filed 2026-10-10 by an automated reviewer; media playback options and the
-  animation rewind flag aren't written back. Comment threads left with #70: the writer now emits
-  the `p188` modern part next to the legacy one.
+### Round trip loses media playback options (#74)
+- **Evidence:** issue filed 2026-10-10 by an automated reviewer. A media shape's trim, its fades
+  and its bookmarks round-trip (`p14:trim`, `p14:fade`, `p14:bmkLst` are written and read back,
+  `crates/pptx/tests/corpus_media.rs` checks them), but the playback **flags** are not: the reader
+  sets the volume to 1 and takes no autoplay, loop, rewind, play-across-slides, hide-while-not-
+  playing or full-screen flag, and the writer emits none of them. The animation rewind flag
+  (#77) round-trips: the reader takes `cTn fill="remove"` and the writer emits it
+  (`crates/pptx/src/read/timing.rs`, `crates/pptx/src/write/timing.rs`).
 - **Impact:** a deck opened and saved silently loses show behaviour.
 - **Estimate:** 2–4 h. **Beta blocker.**
 
@@ -146,6 +150,18 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** sharing a talk as a video is a common request.
 - **Estimate:** 10–16 h (render the timeline frame by frame, which the GIF can then reuse for
   transitions and builds; an H.264 encoder is the hard part, FilmCraft has one to copy).
+
+### The AV1 decoder is the least exercised of the four video codecs
+- **Evidence:** `crates/av1` decodes AV1 v1.0.0 with Errata 1 (intra and inter, CDEF, superres,
+  loop restoration, film grain; frame jobs and tile post-filters on a thread pool), but it has no
+  synthetic decode tests: `h264` and `hevc` carry a `synth_tests` module (about 22 KB each) that
+  decodes patterns the encoder cannot produce, and `vp9` has none either. Of the four, AV1 has the
+  fewest unit tests (10, against vp9's 16) and the smallest sample: one 6-frame 64×64 clip
+  (`crates/media/tests/fixtures/clip-av1.mkv`, 1.2 KB, against vp9's 3.8 KB). A file that
+  exercises multi-reference inter prediction, film grain or a tile layout is never decoded.
+- **Impact:** a deck with AV1 video may decode wrongly or not at all, and nothing in the test
+  suite would notice.
+- **Estimate:** 4–8 h (synthetic tests over the parts the clip never reaches).
 
 ### Embedded MicroType Express font subsets aren't drawn
 - **Evidence:** `p:embeddedFontLst` is read and written. A raw TrueType/OpenType face, or one inside an Embedded OpenType wrapper, is loaded and used to draw. A MicroType Express subset (`application/x-fontdata` with neither form) is kept and written back, and the text still uses a stand-in.
@@ -358,7 +374,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-18 | minor | Localization: the string catalog, the language setting (#15) and a ~60% Vietnamese draft landed; row 5 narrows and the remaining estimate drops to 40–73 h plus native review |
+| 2026-10-20 | minor | The animation rewind flag (#77) round-trips (the reader takes `cTn fill="remove"`, the writer emits it), so row 3 is the media playback options (#74) alone; the entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). New entry: the AV1 decoder is the least exercised of the four video codecs |
 | 2026-10-17 | trivial | Soak entry corrected: the long runs are `#[ignore]`d, so `cargo xtask ci` samples only the short seeded ones |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |
 | 2026-10-15 | trivial | PPTX trigger sequences keep later On Click steps instead of converting them to After Previous; mixed starts, independent buttons and paragraph builds have synthetic round-trip regressions |

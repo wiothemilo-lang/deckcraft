@@ -214,6 +214,10 @@ mod tests {
         let commands = session.commands();
         assert!(commands.len() >= 300, "registry looks thin: {}", commands.len());
         for c in &commands {
+            // The `test.` commands exist only in the test build: they are not shown to anyone.
+            if c.id.starts_with("test.") {
+                continue;
+            }
             let vi = vi::by_id(c.id).unwrap_or_else(|| panic!("no Vietnamese translation for command {}", c.id));
             assert!(!vi.trim().is_empty(), "empty Vietnamese translation for {}", c.id);
         }

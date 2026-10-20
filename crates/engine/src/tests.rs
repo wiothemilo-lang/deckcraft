@@ -3884,6 +3884,100 @@ fn opening_a_file_gives_repeated_shape_ids_fresh_ones() {
     assert_eq!(t.doc().unwrap().selected_shapes()[0].id, last);
 }
 
+/// The preferences say how many undo steps a presentation keeps: the engine used to keep 500
+/// whatever the user asked for, so the setting did nothing.
+#[test]
+fn the_preferences_decide_how_many_undo_steps_are_kept() {
+    let mut s = session();
+    assert_eq!(s.doc().unwrap().history.limit, 500, "the default depth");
+    s.prefs.undo_limit = 3;
+    for i in 0..12 {
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [i as f64, 0.0, 20.0, 20.0]})).unwrap();
+    }
+    let st = s.doc().unwrap();
+    assert_eq!(st.history.limit, 3, "the preference is the depth the presentation keeps");
+    assert!(st.history.undo.len() <= 3, "the undo stack holds {} steps, the preference says 3", st.history.undo.len());
+}
+
+/// Lowering the depth throws the older steps away: the user asked for fewer of them.
+#[test]
+fn lowering_the_undo_depth_throws_the_oldest_steps_away() {
+    let mut s = session();
+    for i in 0..6 {
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [i as f64, 0.0, 20.0, 20.0]})).unwrap();
+    }
+    assert_eq!(s.doc().unwrap().history.undo.len(), 6);
+    s.prefs.undo_limit = 2;
+    s.execute("edit.deselect", &json!({})).unwrap();
+    let st = s.doc().unwrap();
+    assert_eq!(st.history.limit, 2);
+    assert!(st.history.undo.len() <= 2, "the undo stack holds {} steps, the preference says 2", st.history.undo.len());
+}
+
+/// A presentation opened after the preference was changed keeps the depth the user asked for.
+#[test]
+fn a_presentation_opened_later_keeps_the_chosen_depth() {
+    let mut s = Session::new();
+    s.prefs.undo_limit = 7;
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().history.limit, 7);
+}
+
+/// A command that fails changes nothing: not the presentation, not what it asked the UI for,
+/// not the clipboard, not the painters.
+#[test]
+fn a_failed_command_leaves_no_trace_outside_the_presentation() {
+    let mut s = session();
+    let id =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 120.0, 80.0], "text": "Hello"})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("edit.copy", &json!({})).unwrap();
+    let clipboard = s.clipboard.clone();
+    assert_eq!(clipboard.plain, "Hello", "something was copied");
+    let err = s.execute("test.askAndFail", &json!({})).unwrap_err();
+    assert!(err.to_string().contains("on purpose"), "{err}");
+    assert!(s.ui_requests.is_empty(), "the failed command still asked the UI for a dialog: {:?}", s.ui_requests);
+    assert_eq!(s.clipboard.plain, clipboard.plain, "the failed command changed the clipboard");
+    assert!(s.painter.is_none(), "the failed command armed the painter");
+}
+
+/// `format.painterApply` lets go of the painter before it pastes the formatting: when the paste
+/// fails, the painter must stay armed (a real command, not a test one).
+#[test]
+fn a_failed_paste_of_the_format_keeps_the_painter_armed() {
+    let mut s = session();
+    let id = s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("format.painter", &json!({})).unwrap();
+    assert!(s.painter.is_some(), "the painter is armed");
+    let err = s.execute("format.painterApply", &json!({"ids": [9999]})).unwrap_err();
+    assert!(err.to_string().contains("no such shape"), "{err}");
+    assert!(s.painter.is_some(), "the failed paste let go of the painter");
+}
+
+/// A params doc that does not parse is a bug in the command: it must be reported, not swallowed
+/// (the hosts that show the parameters would show nothing without a word).
+#[test]
+fn a_broken_params_doc_is_reported_not_swallowed() {
+    let spec = cmd::CommandSpec {
+        id: "test.broken",
+        label: "Broken",
+        menu: &["Test"],
+        shortcut: None,
+        params: "{preset rect}",
+        enabled: cmd::always,
+        run: |_: &mut Session, _: &serde_json::Value| Ok(serde_json::Value::Null),
+        journal: false,
+        undoable: false,
+    };
+    assert!(spec.params_error().is_some(), "the broken doc is reported: {:?}", spec.params_error());
+    assert!(spec.acts_on().is_none(), "and the command does not pretend to take ids");
+    // Every command that ships parses.
+    for c in command_specs() {
+        assert!(c.params_error().is_none(), "{}: {:?}", c.id, c.params_error());
+    }
+}
+
 #[test]
 fn change_case_spans_formatting_runs() {
     let setup = |text: &str, bold_to: usize| {

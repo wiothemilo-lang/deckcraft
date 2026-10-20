@@ -141,6 +141,8 @@ fn purpose_of(purpose: &str) -> FilePurpose {
     }
 }
 
+/// A file the app opens as a presentation. `.slidecraft` is the name from before the
+/// SlideCraft → DeckCraft rename: the format still reads such files, so they open too.
 fn is_presentation_name(lower: &str) -> bool {
     lower.ends_with(".deckcraft")
         || lower.ends_with(".slidecraft")
@@ -3412,5 +3414,15 @@ mod tests {
         let after = harness.state().ui.ui_scale;
         assert!(after > before + 0.3, "letting go applies the size dragged to: {before} -> {after}");
         assert!(harness.state().dialog.is_some(), "Preferences stays open");
+    }
+
+    /// A file written before the SlideCraft → DeckCraft rename (`.slidecraft`) is still a
+    /// presentation: the user may pick it, and it opens like any other deck (the format
+    /// crate reads it).
+    #[test]
+    fn a_legacy_slidecraft_file_is_opened_as_a_presentation() {
+        assert!(is_presentation_name("deck.slidecraft"));
+        assert_eq!(open_command("deck.slidecraft"), Some("file.openBytes"));
+        assert_eq!(infer_command("deck.slidecraft", b"PK\x03\x04"), Some("file.openBytes"));
     }
 }

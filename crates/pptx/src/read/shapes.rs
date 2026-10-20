@@ -65,17 +65,8 @@ pub fn sp_tree(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, tree: &El, depth: us
             break;
         }
         let s = match e.local() {
-            "sp" => Some(sp(imp, part, ctx, e)),
-            "pic" => Some(pic(imp, part, ctx, e)),
-            "grpSp" => Some(grp(imp, part, ctx, e, depth)),
-            "cxnSp" => Some(cxn(imp, part, ctx, e)),
-            "graphicFrame" => Some(frame(imp, part, ctx, e, depth)),
-            "contentPart" => content_part(imp, part, ctx, e).or_else(|| {
-                log::warn!("pptx: content part in {} not imported", part.name);
-                None
-            }),
-            "AlternateContent" => read_model_alternate(imp, part, ctx, e),
-            _ => None,
+            "AlternateContent" => read_alternate(imp, part, ctx, e, depth),
+            _ => shape_of(imp, part, ctx, e, depth),
         };
         if let Some(s) = s {
             ctx.count += 1;
@@ -86,6 +77,22 @@ pub fn sp_tree(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, tree: &El, depth: us
         remap_connectors(&mut out, ctx, 0);
     }
     out
+}
+
+/// Read one shape element, whatever it is.
+fn shape_of(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> Option<Shape> {
+    match e.local() {
+        "sp" => Some(sp(imp, part, ctx, e)),
+        "pic" => Some(pic(imp, part, ctx, e)),
+        "grpSp" => Some(grp(imp, part, ctx, e, depth)),
+        "cxnSp" => Some(cxn(imp, part, ctx, e)),
+        "graphicFrame" => Some(frame(imp, part, ctx, e, depth)),
+        "contentPart" => content_part(imp, part, ctx, e).or_else(|| {
+            log::warn!("pptx: content part in {} not imported", part.name);
+            None
+        }),
+        _ => None,
+    }
 }
 
 /// ActiveX controls (`p:controls`): each control's picture (`p:pic`), the image PowerPoint shows
@@ -314,9 +321,14 @@ fn content_part(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Option<S
     Some(s)
 }
 
-/// A 3-D model wrapped in `mc:AlternateContent`: the model choice, plus the fallback picture.
-/// If the model part is missing, the fallback picture is the shape.
-fn read_model_alternate(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Option<Shape> {
+/// A shape tree's `mc:AlternateContent`.
+///
+/// The branch we understand becomes the shape. A block whose choice uses a namespace we don't
+/// know is kept whole (as an [`ShapeKind::Opaque`]), with its fallback as what the shape shows:
+/// the choice we cannot read must come back when the deck is saved again.
+fn read_alternate(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> Option<Shape> {
+    // A 3-D model wrapped in `mc:AlternateContent`: the model choice, plus the fallback picture.
+    // If the model part is missing, the fallback picture is the shape.
     if let Some(content) = e.children_named("Choice").find_map(find_content_part)
         && let Some(mut s) = content_part(imp, part, ctx, content)
     {
@@ -330,7 +342,86 @@ fn read_model_alternate(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> 
         }
         return Some(s);
     }
-    e.child("Fallback").and_then(|fb| fb.elements().find(|c| c.is("pic")).map(|p| pic(imp, part, ctx, p)))
+    // A choice we can read: its content is the shape.
+    if let Some(ch) = super::supported_choice(e)
+        && let Some(s) = branch_shape(imp, part, ctx, ch, e, depth)
+    {
+        return Some(s);
+    }
+    // No choice we can read: the fallback is what every reader shows.
+    let mut s = match e.child("Fallback") {
+        Some(fb) => branch_shape(imp, part, ctx, fb, e, depth)?,
+        None => {
+            // Nothing to show: keep the block under a name we can find again.
+            let mut s = Shape { id: ctx.assign(imp, None), ..Default::default() };
+            s.name = e.find("cNvPr").and_then(|c| c.attr("name")).unwrap_or("Object").to_string();
+            s
+        }
+    };
+    // A choice with a namespace we don't know: keep the whole block, so the choice is not lost on
+    // the next save. The fallback stays what the shape shows.
+    if e.children_named("Choice").any(|ch| !super::choice_supported(ch)) {
+        keep_alternate(imp, part, &mut s, e);
+    }
+    Some(s)
+}
+
+/// The shape a branch of an `mc:AlternateContent` holds: its first shape element, with the
+/// namespace declarations of the branch carried over (a branch binds the prefixes it uses itself,
+/// not on the part root).
+fn branch_shape(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, branch: &El, ac: &El, depth: usize) -> Option<Shape> {
+    let mut first = true;
+    for c in branch.elements() {
+        if !first {
+            log::warn!("pptx: an alternate content branch holds more than one shape; the first is read");
+            break;
+        }
+        first = false;
+        let mut c = c.clone();
+        for (k, v) in branch.attrs.iter().chain(ac.attrs.iter()) {
+            if k.starts_with("xmlns") && !c.attrs.iter().any(|(a, _)| a == k) {
+                c.attrs.push((k.clone(), v.clone()));
+            }
+        }
+        if let Some(s) = shape_of(imp, part, ctx, &c, depth) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// Keep an `mc:AlternateContent` block whole: its XML, the parts it points to and the picture it
+/// falls back to. The shape keeps the fallback's own look, so it still shows what the file showed.
+fn keep_alternate(imp: &mut Imp, part: &Part, s: &mut Shape, e: &El) {
+    let preview = match &s.kind {
+        ShapeKind::Picture { fill } => Some(fill.media),
+        _ => e.child("Fallback").and_then(|fb| {
+            let mut pics = vec![];
+            fb.find_all("blip", &mut pics);
+            pics.into_iter().find_map(|b| dml::media_ref(imp, part, b))
+        }),
+    };
+    let label = if s.name.is_empty() { "Object".to_string() } else { s.name.clone() };
+    s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label, parts: kept_parts_of(imp, part, e) };
+}
+
+/// The parts a kept element points to, so a save writes them back: (the relationship id the XML
+/// uses, the relationship type, the part as a media item). A part with relationships of its own
+/// cannot be carried: the save then falls back to the preview.
+fn kept_parts_of(imp: &mut Imp, part: &Part, e: &El) -> Vec<(String, String, deckcraft_model::MediaId)> {
+    super::rel_refs(e)
+        .into_iter()
+        .map(|id| {
+            let rel = part.rels.get(&id).filter(|r| !r.external)?;
+            if !imp.pkg.rels(&rel.target).items.is_empty() {
+                return None;
+            }
+            let (kind, target) = (rel.ty.clone(), rel.target.clone());
+            let media = if rel.kind == "diagramData" { diagram_data(imp, &target) } else { imp.media_for(&target) };
+            Some((id, kind, media?))
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
 }
 
 fn pic(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Shape {
@@ -452,19 +543,7 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
     };
     // Keep the parts it points to so a save writes it back whole (#203). A part with relationships
     // of its own, or an external link, can't be carried: the save then falls back to the preview.
-    let parts = super::rel_refs(e)
-        .into_iter()
-        .map(|id| {
-            let rel = part.rels.get(&id).filter(|r| !r.external)?;
-            if !imp.pkg.rels(&rel.target).items.is_empty() {
-                return None;
-            }
-            let (kind, target) = (rel.ty.clone(), rel.target.clone());
-            let media = if rel.kind == "diagramData" { diagram_data(imp, &target) } else { imp.media_for(&target) };
-            Some((id, kind, media?))
-        })
-        .collect::<Option<Vec<_>>>()
-        .unwrap_or_default();
+    let parts = kept_parts_of(imp, part, e);
     s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label, parts };
     s
 }

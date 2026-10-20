@@ -65,7 +65,8 @@ overlays an invisible real-text layer with embedded font subsets.
   ignored, sizes and depths bounded, zip bombs capped), writer that PowerPoint opens without
   repair. Unknown elements round-trip through `Opaque` and `raw_ext` fields.
 - **Native** (`crates/format`): zip with `mimetype`, `presentation.json` and `media/<id>`; readers
-  ignore unknown fields; `.slidecraft` files from before the rename still open.
+  ignore unknown fields; `.slidecraft` files from before the rename open too (the manifest's
+  `format` may name either).
 - Formats and their gaps: [file-format-parity.md](file-format-parity.md).
 
 ## Quality gates
@@ -81,6 +82,7 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | The native format reads a file written before the SlideCraft to DeckCraft rename: the manifest's `format` may name `slidecraft` as well as `deckcraft`, and the file opens like any other deck |
 | 2026-10-17 | minor | Control channel: a `control.hello` token handshake before any method (transport-answered, so an unauthenticated peer cannot run one or fill the queue). The wasm check covers `mcp` and the web app, not just the libraries. Both painters are disarmed through commands |
 | 2026-10-14 | minor | Community PR wave folded: one L2/L5/L6 row each; command registry 320 (`cmd!` registrations in `cmd/*`), 41 dialogs (titled in `dialogs.rs`), 202k lines, 24 crates (`metafile` added at L0), 1,641 tests. The per-PR rows below give the counts each PR saw on its own branch |
 | 2026-10-14 | minor | Size and Position dialog (`shape.sizePosition`): position, size, rotation, scale and lock aspect in one undo step. 227 commands, 28 dialogs |

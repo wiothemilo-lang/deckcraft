@@ -141,6 +141,15 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
                 used.insert(p.to_string());
             }
         }
+        // The prefixes an `mc:Choice` requires are named in an attribute value, but they have to be
+        // declared all the same.
+        if e.is("Choice")
+            && let Some(req) = e.attr("Requires")
+        {
+            for r in req.split_whitespace() {
+                used.insert(r.to_string());
+            }
+        }
         for c in e.elements() {
             rec(c, used, depth + 1);
         }
@@ -166,6 +175,24 @@ fn chartex_readable(ch: &El) -> bool {
     let mut found = vec![];
     ch.find_all("graphicData", &mut found);
     found.iter().any(|g| g.attr("uri").is_some_and(|u| u.ends_with("/chartex")))
+}
+
+/// Is this `mc:Choice` branch one whose namespace we know? Every prefix in `Requires` is one we
+/// support, so a reader that knows it (PowerPoint) takes this branch.
+pub fn choice_supported(ch: &El) -> bool {
+    ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r))
+}
+
+/// Can we model this `mc:Choice` branch's content? Ink content parts are not modelled: their
+/// fallback picture is what we show instead.
+pub fn choice_modelled(ch: &El) -> bool {
+    !ch.elements().any(|e| e.is("contentPart")) && (!ch.attr("Requires").unwrap_or("").contains("cx1") || chartex_readable(ch))
+}
+
+/// The `mc:Choice` branch we can read: the first one whose namespace we know and whose content we
+/// can model.
+pub fn supported_choice(ac: &El) -> Option<&El> {
+    ac.children_named("Choice").find(|ch| choice_supported(ch) && choice_modelled(ch))
 }
 
 /// A relationship to an embedded 3-D model (`.glb`).
@@ -276,6 +303,9 @@ fn kept_parts(pkg: &Package, pres_path: &str) -> Vec<deckcraft_model::KeptPart> 
 /// A 3-D model choice is left in place (even when its `Requires` prefix is not one we otherwise
 /// understand) so the shape reader can keep the model and its fallback picture. Ink content parts
 /// still fall through to the fallback picture.
+///
+/// A shape tree keeps its `mc:AlternateContent` blocks: the shape reader reads the branch it
+/// understands and keeps the block whole, so a branch we cannot read is not lost on the next save.
 pub fn resolve_mc(el: &mut El, depth: usize) {
     resolve_mc_rels(el, depth, None);
 }
@@ -284,7 +314,9 @@ fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
     if depth > crate::xml::MAX_DEPTH {
         return;
     }
-    if el.children.iter().any(|c| matches!(c, Node::El(e) if e.is("AlternateContent"))) {
+    // A shape tree (a slide's, a group's) hands its blocks to the shape reader.
+    let shape_tree = el.is("spTree") || el.is("grpSp");
+    if !shape_tree && el.children.iter().any(|c| matches!(c, Node::El(e) if e.is("AlternateContent"))) {
         let mut out = Vec::with_capacity(el.children.len());
         for c in std::mem::take(&mut el.children) {
             match c {
@@ -293,14 +325,7 @@ fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
                         out.push(Node::El(ac));
                         continue;
                     }
-                    let choice = ac.children_named("Choice").find(|ch| {
-                        let req_ok = ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r));
-                        // Ink content parts are not modelled; prefer their fallback picture.
-                        let modelled = !ch.elements().any(|e| e.is("contentPart"))
-                            && (!ch.attr("Requires").unwrap_or("").contains("cx1") || chartex_readable(ch));
-                        req_ok && modelled
-                    });
-                    let branch = choice.or_else(|| ac.child("Fallback"));
+                    let branch = supported_choice(&ac).or_else(|| ac.child("Fallback"));
                     if let Some(b) = branch {
                         for n in &b.children {
                             if let Node::El(e) = n {

@@ -1,12 +1,12 @@
 //! Clean-room AV1 decoder, implemented from the AV1 Bitstream & Decoding Process Specification
 //! v1.0.0 with Errata 1 (AOMediaCodec/av1-spec).
 //!
-//! `docs/gaps.md` records how far each stage is finished; `stats.rs` counts what a run touched.
+//! `docs/gaps.md` (the section "The AV1 decoder is the least exercised of the four video
+//! codecs") records how far this stage is finished; `stats.rs` counts what a run touched.
 
-// Items used only by stages still being written (inter prediction, post filters).
-// Spec-style indexed loops (FilmCraft allows this lint workspace-wide).
+// The specification's own pseudo-code indexes its arrays by position, so the loops here do
+// too (FilmCraft allows this lint workspace-wide).
 #![allow(clippy::needless_range_loop)]
-#![allow(dead_code)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable))]
 
 mod bits;
