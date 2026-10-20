@@ -22,8 +22,8 @@ unchanged. Native unwind guards cannot catch WASM aborts or process-wide allocat
 
 Rust 1.95 or newer is required. The workspace pins `craft-pdf` 0.1.0 and its Krilla 0.8.2
 patch to `https://github.com/storytold/craft-libs` revision
-`39adbdf756569c8e03adb747d5e063f468ca98c1`. Both packages resolve from that immutable Git source;
-a sibling checkout is unnecessary. Publish and review this shared-library prerequisite
+`c3487320b2d1de657b860b3c8abb44e1f2b32bd8`. Both packages resolve from that immutable Git
+source; a sibling checkout is unnecessary. Publish and review this shared-library prerequisite
 before publishing the app migration, so fresh CI and release builds can fetch it.
 
 Run `cargo test -p deckcraft-pdf` for export contracts and `cargo xtask ci` for all workspace

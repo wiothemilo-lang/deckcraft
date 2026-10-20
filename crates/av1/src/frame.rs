@@ -157,14 +157,6 @@ impl FrameBuf {
             height: self.height,
         }
     }
-
-    pub fn plane_width(&self, plane: usize) -> usize {
-        if plane == 0 { self.width } else { (self.width + self.subsampling_x) >> self.subsampling_x }
-    }
-
-    pub fn plane_height(&self, plane: usize) -> usize {
-        if plane == 0 { self.height } else { (self.height + self.subsampling_y) >> self.subsampling_y }
-    }
 }
 
 /// A motion vector (row, col) in 1/8 sample units.

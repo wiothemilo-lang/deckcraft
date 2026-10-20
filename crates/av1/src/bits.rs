@@ -15,6 +15,9 @@ impl<'a> BitReader<'a> {
     }
 
     /// `get_position()`: bits consumed.
+    // The spec's own descriptor names, kept as the toolkit the frame-header parser
+    // grows into; the current parsers reach none of the three.
+    #[allow(dead_code)]
     pub fn position(&self) -> usize {
         self.pos
     }
@@ -61,6 +64,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// `le(n)`
+    #[allow(dead_code)]
     pub fn le(&mut self, n: u32) -> Result<u32> {
         let mut t = 0u32;
         for i in 0..n {
@@ -70,6 +74,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// `leb128()`
+    #[allow(dead_code)]
     pub fn leb128(&mut self) -> Result<u64> {
         let mut v = 0u64;
         for i in 0..8 {

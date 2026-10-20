@@ -55,6 +55,9 @@ impl Pool {
     }
 
     /// `f(i, chunk)` for the consecutive `chunk_len`-element chunks of `data`.
+    // The post-filters take the pool but still run on the frame worker, so the chunked
+    // variant has no caller yet; the row-parallel filters will use it.
+    #[allow(dead_code)]
     pub fn chunks<T: Send>(&self, data: &mut [T], chunk_len: usize, f: impl Fn(usize, &mut [T]) + Sync + Send) {
         let chunk_len = chunk_len.max(1);
         #[cfg(feature = "threads")]
