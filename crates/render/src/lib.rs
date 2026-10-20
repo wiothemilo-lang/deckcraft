@@ -416,6 +416,45 @@ fn run_blurred(r: &deckcraft_model::text::RunProps) -> bool {
     r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0)
 }
 
+/// The filter check as it was before it stopped copying the effects of every shape and stopped
+/// reading the master's text styles once per shape: the test holds the two to the same answer.
+#[cfg(test)]
+fn needs_filters_reference(pres: &Presentation, slide: &Slide) -> bool {
+    let Some(rctx) = Ctx::for_slide(pres, slide) else { return false };
+    let mut any = false;
+    let mut check = |shapes: &[Shape]| {
+        deckcraft_model::walk(shapes, &mut |s, _| {
+            if any {
+                return;
+            }
+            let (e, _) = resolve::effects(&rctx, s);
+            if e.is_some_and(|e| !e.is_empty()) || text_has_effects_reference(&rctx, s) {
+                any = true;
+            }
+        });
+    };
+    check(&slide.shapes);
+    if let Some(l) = rctx.layout {
+        check(&l.shapes);
+    }
+    check(&rctx.master.shapes);
+    any
+}
+
+/// The text check as it was before the master's text styles were read once per slide.
+#[cfg(test)]
+fn text_has_effects_reference(rctx: &Ctx, s: &Shape) -> bool {
+    use deckcraft_model::text::{ListStyle, RunProps};
+    let fx = |r: &RunProps| r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0);
+    let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| fx(&lv.run));
+    let Some(t) = &s.text else { return false };
+    t.paragraphs.iter().any(|p| p.runs.iter().any(|r| fx(&r.props)) || fx(&p.end_props))
+        || styled(&t.list_style)
+        || styled(&rctx.master.title_style)
+        || styled(&rctx.master.body_style)
+        || styled(&rctx.master.other_style)
+}
+
 /// Render slide `index` at `opts.scale` pixels per point. A panic inside the renderer becomes a
 /// blank image (logged), never a crash.
 pub fn render_slide(pres: &Presentation, index: usize, opts: &RenderOpts) -> Image {

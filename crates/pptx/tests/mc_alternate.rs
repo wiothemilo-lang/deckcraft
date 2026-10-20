@@ -123,6 +123,34 @@ fn an_unsupported_choice_with_a_poster_survives_a_save() {
     assert!(part(&out2, "ppt/slides/slide1.xml").contains(r#"Requires="p99""#));
 }
 
+/// A choice whose part is not in the package cannot be written: it is dropped, and the fallback
+/// goes on its own. An `mc:AlternateContent` needs a choice, so a block without one is not valid.
+#[test]
+fn a_choice_whose_part_is_gone_is_dropped_and_the_fallback_stays() {
+    let pic = |id: u32, name: &str, rel: &str| {
+        format!(
+            r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{name}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rel}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#
+        )
+    };
+    let block = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p99="http://example.org/deckcraft/2026/p99" Requires="p99">{}</mc:Choice><mc:Fallback>{}</mc:Fallback></mc:AlternateContent>"#,
+        pic(70, "Choice shape", "rIdGone"),
+        pic(71, "Poster", "rIdPoster")
+    );
+    let bytes = deck_with(&block, true);
+    // The choice's picture is not in the package.
+    let p = deckcraft_pptx::import(&bytes).expect("import");
+    assert!(names(&p).contains(&"Poster".to_string()), "{:?}", names(&p));
+
+    let out = deckcraft_pptx::export(&p).expect("export");
+    let slide = part(&out, "ppt/slides/slide1.xml");
+    assert!(!slide.contains("mc:AlternateContent"), "a block without a choice is not valid: {slide}");
+    assert!(slide.contains("r:embed="), "the fallback is gone: {slide}");
+    // The file still opens, and the poster is still there.
+    let p2 = deckcraft_pptx::import(&out).expect("re-import");
+    assert!(names(&p2).contains(&"Poster".to_string()), "{:?}", names(&p2));
+}
+
 /// A choice we do understand is read as before: its content is the shape, and the file keeps a
 /// block of its own.
 #[test]

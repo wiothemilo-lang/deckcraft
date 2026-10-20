@@ -352,6 +352,23 @@ fn writable_format_for_path_rejects_formats_deckcraft_does_not_write() {
 }
 
 #[test]
+fn a_legacy_slidecraft_file_is_saved_in_its_own_format() {
+    use crate::cmd::file::{format_for_path, save_bytes};
+    // A file from before the rename keeps its container, so the name and the content agree.
+    assert_eq!(format_for_path("deck.slidecraft"), "slidecraft");
+    assert_eq!(format_for_path("DECK.SLIDECRAFT"), "slidecraft");
+    let bytes = save_bytes(&deckcraft_model::defaults::new_presentation(None), "slidecraft").unwrap();
+    // The legacy container, and it opens.
+    assert!(
+        bytes.windows(deckcraft_format::LEGACY_MIMETYPE.len()).any(|w| w == deckcraft_format::LEGACY_MIMETYPE.as_bytes()),
+        "the legacy mimetype is there"
+    );
+    assert!(!bytes.windows(deckcraft_format::MIMETYPE.len()).any(|w| w == deckcraft_format::MIMETYPE.as_bytes()), "and not the current one");
+    assert!(deckcraft_format::sniff(&bytes), "the file is recognised");
+    assert!(deckcraft_format::load(&bytes).is_ok(), "the file opens");
+}
+
+#[test]
 fn save_and_reopen_native() {
     let mut s = Session::new();
     sample::open_sample(&mut s).unwrap();

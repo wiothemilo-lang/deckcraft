@@ -153,12 +153,13 @@ Detail in [file-format-parity.md](file-format-parity.md).
 
 ### The AV1 decoder is the least exercised of the four video codecs
 - **Evidence:** `crates/av1` decodes AV1 v1.0.0 with Errata 1 (intra and inter, CDEF, superres,
-  loop restoration, film grain; frame jobs and tile post-filters on a thread pool), but it has no
-  synthetic decode tests: `h264` and `hevc` carry a `synth_tests` module (about 22 KB each) that
-  decodes patterns the encoder cannot produce, and `vp9` has none either. Of the four, AV1 has the
-  fewest unit tests (10, against vp9's 16) and the smallest sample: one 6-frame 64×64 clip
-  (`crates/media/tests/fixtures/clip-av1.mkv`, 1.2 KB, against vp9's 3.8 KB). A file that
-  exercises multi-reference inter prediction, film grain or a tile layout is never decoded.
+  loop restoration, film grain; the frame jobs run on a worker pool and the tiles of a frame in
+  parallel), but it has no synthetic decode tests: `h264` and `hevc` carry a `synth_tests` module
+  (23 KB and 22 KB) that decodes patterns the encoder cannot produce, and `vp9` has none either.
+  Of the four, AV1 has the fewest unit tests (10, against vp9's 16) and the smallest sample: one
+  6-frame 64×64 clip (`crates/media/tests/fixtures/clip-av1.mkv`, 1.2 KB, against vp9's 3.8 KB).
+  A file that exercises multi-reference inter prediction, film grain or a tile layout is never
+  decoded.
 - **Impact:** a deck with AV1 video may decode wrongly or not at all, and nothing in the test
   suite would notice.
 - **Estimate:** 4–8 h (synthetic tests over the parts the clip never reaches).
