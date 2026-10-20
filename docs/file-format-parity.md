@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (opaque SmartArt/OLE parts retain bounded nested relationships through PPTX and native saves; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque graph media survives cross-document paste and rejected graphs leave no new hidden parts; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -106,6 +106,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Opaque graphs retain media identity through shape/slide clipboard commands; rejected import allocations are discarded without deleting shared media, and export validates complete roots/branches before emitting bytes or links. Package checks include late failures and colliding destination ids |
 | 2026-10-20 | minor | Opaque part relationships survive PPTX/native saves (#203 partial): original relationship ids, image bytes and external URLs are kept under fresh package paths; traversal is bounded and cycles reuse existing media ids. No new live PowerPoint validation |
 | 2026-10-20 | minor | Modern-comment parts bind the `a:` and `r:` prefixes (#974); namespace-aware regression checks cover each XML/relationship part and a second save in PPTX, POTX and PPSX |
 | 2026-10-20 | minor | Media playback options (#74) read and written through standard timing nodes, including `p:video fullScrn`; tests cover each option, animation coexistence, groups, duplicate model ids, manual start conditions and non-finite/bounded volume |

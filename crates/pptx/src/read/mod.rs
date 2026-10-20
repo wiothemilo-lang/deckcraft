@@ -3,7 +3,7 @@
 pub(crate) mod chart;
 mod chartex;
 pub(crate) mod dml;
-mod opaque;
+pub(crate) mod opaque;
 mod shapes;
 mod theme;
 mod timing;

@@ -1,6 +1,6 @@
 //! Edit menu: undo/redo, clipboard, duplicate, delete, select all.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use deckcraft_model::text::TextBody;
@@ -67,28 +67,9 @@ fn slides_scope(s: &Session, p: &Value) -> bool {
         || s.active().is_some_and(|d| d.selection.shapes.is_empty() && d.selection.text.is_none() && !d.selection.slides.is_empty())
 }
 
+/// Collect every media reference carried by copied shapes, including opaque part graphs.
 pub(crate) fn media_of_shapes(shapes: &[Shape], out: &mut Vec<MediaId>) {
-    deckcraft_model::walk(shapes, &mut |s, _| {
-        match &s.kind {
-            deckcraft_model::ShapeKind::Picture { fill } => out.push(fill.media),
-            deckcraft_model::ShapeKind::Media(m) => {
-                out.push(m.media);
-                if let Some(p) = m.poster {
-                    out.push(p);
-                }
-            }
-            deckcraft_model::ShapeKind::Model3d { media, poster } => {
-                out.push(*media);
-                if let Some(p) = poster {
-                    out.push(*p);
-                }
-            }
-            _ => {}
-        }
-        if let Some(deckcraft_model::Fill::Picture(pf)) = &s.fill {
-            out.push(pf.media);
-        }
-    });
+    crate::media_refs::visit::shapes(shapes, &mut |id| out.push(*id));
 }
 
 fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
@@ -111,10 +92,7 @@ fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
         let slides: Vec<Slide> = ids.iter().filter_map(|id| st.doc.slide(*id).cloned()).collect();
         let mut mids = vec![];
         for sl in &slides {
-            media_of_shapes(&sl.shapes, &mut mids);
-            if let Some(deckcraft_model::Background::Fill { fill: deckcraft_model::Fill::Picture(pf) }) = &sl.background {
-                mids.push(pf.media);
-            }
+            crate::media_refs::visit::slide(sl, &mut |id| mids.push(*id));
         }
         let media = st.doc.media.iter().filter(|m| mids.contains(&m.id)).cloned().collect();
         let plain = slides.iter().map(|x| x.title()).collect::<Vec<_>>().join("\n");
@@ -253,39 +231,38 @@ fn remap_media(shapes: &mut [Shape], map: &HashMap<MediaId, MediaId>) {
     if map.is_empty() {
         return;
     }
-    let m = |id: &mut MediaId| {
+    let mut m = |id: &mut MediaId| {
         if let Some(n) = map.get(id) {
             *id = *n;
         }
     };
-    walk_mut(shapes, &mut |s| {
-        match &mut s.kind {
-            deckcraft_model::ShapeKind::Picture { fill } => m(&mut fill.media),
-            deckcraft_model::ShapeKind::Media(c) => {
-                m(&mut c.media);
-                if let Some(p) = c.poster.as_mut() {
-                    m(p);
-                }
-            }
-            deckcraft_model::ShapeKind::Opaque { preview: Some(p), .. } => m(p),
-            _ => {}
-        }
-        if let Some(deckcraft_model::Fill::Picture(pf)) = &mut s.fill {
-            m(&mut pf.media);
-        }
-    });
+    crate::media_refs::visit_mut::shapes(shapes, &mut m);
 }
 
-/// Add the clipboard's media to `doc` and return the ids that changed: an id already used in
-/// `doc` by other bytes (another deck) gets a fresh id, and the pasted shapes must use it.
-fn bring_media(cmd: &str, doc: &mut deckcraft_model::Presentation, media: &[deckcraft_model::MediaItem]) -> Result<HashMap<MediaId, MediaId>> {
+/// Transfer media without conflating external links or opaque parts whose identical bytes can
+/// have different outgoing relationships. Fresh items share their byte allocation with the clip.
+fn bring_media(cmd: &str, doc: &mut deckcraft_model::Presentation, clip: &crate::Clipboard) -> Result<HashMap<MediaId, MediaId>> {
+    let mut sources = HashSet::new();
+    let mut collect = |s: &Shape, _: usize| {
+        if let deckcraft_model::ShapeKind::Opaque { parts, rels, .. } = &s.kind {
+            sources.extend(parts.iter().map(|(_, _, id)| *id));
+            sources.extend(rels.iter().map(|r| r.source));
+        }
+    };
+    deckcraft_model::walk(&clip.shapes, &mut collect);
+    for sl in &clip.slides {
+        deckcraft_model::walk(&sl.shapes, &mut collect);
+    }
+    // Reserve incoming ids before any allocation, including those copied without a collision.
+    doc.next_id = clip.media.iter().fold(doc.next_id, |n, m| n.max(m.id.0));
     let mut map = HashMap::new();
-    for m in media {
+    for m in &clip.media {
         match doc.media(m.id) {
             None => doc.media.push(m.clone()),
-            Some(x) if x.data == m.data => {}
+            Some(x) if !sources.contains(&m.id) && x.data == m.data && x.link == m.link && x.content_type == m.content_type => {}
             Some(_) => {
-                let id = doc.add_media(&m.name, &m.content_type, m.data.as_ref().clone()).ok_or_else(|| bad(cmd, NO_ID_SPACE))?;
+                let id = MediaId(doc.alloc_id().ok_or_else(|| bad(cmd, NO_ID_SPACE))?);
+                doc.media.push(deckcraft_model::MediaItem { id, ..m.clone() });
                 map.insert(m.id, id);
             }
         }
@@ -319,19 +296,18 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     if !clip.slides.is_empty() {
         let at = s.doc()?.selection.slide + 1;
         return s.edit(|doc, sel| {
-            let media = bring_media("edit.paste", doc, &clip.media)?;
+            let media = bring_media("edit.paste", doc, &clip)?;
             let mut new_ids = vec![];
             for (k, sl) in clip.slides.iter().enumerate() {
                 let mut sl = sl.clone();
                 sl.id = SlideId(doc.alloc_id().ok_or_else(|| bad("edit.paste", NO_ID_SPACE))?);
                 let map = reid("edit.paste", doc, &mut sl.shapes)?;
                 remap_animations(&mut sl.animations, &map);
-                remap_media(&mut sl.shapes, &media);
-                if let Some(deckcraft_model::Background::Fill { fill: deckcraft_model::Fill::Picture(pf) }) = &mut sl.background
-                    && let Some(n) = media.get(&pf.media)
-                {
-                    pf.media = *n;
-                }
+                crate::media_refs::visit_mut::slide(&mut sl, &mut |id| {
+                    if let Some(n) = media.get(id) {
+                        *id = *n;
+                    }
+                });
                 if doc.layout(sl.layout).is_none() {
                     sl.layout = doc.masters.first().and_then(|m| m.layouts.first()).map(|l| l.id).unwrap_or_default();
                 }
@@ -352,7 +328,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let same_slide = s.doc().ok().is_some_and(|d| clip.shapes.iter().any(|c| d.shape(c.id).is_some()));
         let off = if same_slide { off } else { 0.0 };
         return s.edit(|doc, sel| {
-            let media = bring_media("edit.paste", doc, &clip.media)?;
+            let media = bring_media("edit.paste", doc, &clip)?;
             let mut shapes = clip.shapes.clone();
             reid("edit.paste", doc, &mut shapes)?;
             remap_media(&mut shapes, &media);
@@ -502,7 +478,8 @@ fn paste_picture(s: &mut Session) -> Result<Value> {
     }
     let st = s.doc()?;
     let mut doc = (*st.doc).clone();
-    bring_media("edit.pasteSpecial", &mut doc, &clip.media)?;
+    let media = bring_media("edit.pasteSpecial", &mut doc, &clip)?;
+    remap_media(&mut clip.shapes, &media);
     let mut slide = st.current_slide().cloned().ok_or_else(|| bad("edit.pasteSpecial", "no slide"))?;
     let xs: Vec<deckcraft_geom::Xfrm> = clip.shapes.iter().filter_map(|x| x.xfrm).collect();
     let b = super::arrange::union_bounds(&xs).ok_or_else(|| bad("edit.pasteSpecial", "nothing to draw"))?;

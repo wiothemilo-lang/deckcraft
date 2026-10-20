@@ -9,49 +9,74 @@ use super::Exp;
 use crate::opc::RelsOut;
 
 impl Exp<'_> {
-    /// Write each kept part's relationships once, preserving ids used inside its XML. Validate
-    /// the complete set before writing any relationship part; malformed native data falls back.
-    pub(super) fn opaque_rels(&mut self, rels: &[OpaqueRel]) -> bool {
+    /// Validate the reachable graph without emitting bytes, then write each part's relationships
+    /// once. Rejected roots and discarded alternate branches never add hidden package entries.
+    pub(super) fn opaque_rels(&mut self, roots: &[MediaId], rels: &[OpaqueRel]) -> bool {
         if rels.len() > 1024 {
             return false;
         }
-        let mut planned: HashMap<MediaId, (String, RelsOut)> = HashMap::new();
+        let used = crate::read::opaque::graph_ids(roots.iter().copied(), rels);
+        let mut planned: HashMap<MediaId, Vec<(String, String, MediaId)>> = HashMap::new();
+        for id in &used {
+            let Some(media) = self.p.media(*id) else { return false };
+            if media.data.is_empty() {
+                if !media.link.as_deref().is_some_and(safe_word) {
+                    return false;
+                }
+            } else {
+                planned.insert(*id, vec![]);
+            }
+        }
         let mut ids = HashSet::new();
-        for rel in rels {
-            if [&rel.id, &rel.rel_type].iter().any(|s| s.is_empty() || s.len() > 4096 || s.chars().any(char::is_control))
-                || !ids.insert((rel.source, rel.id.as_str()))
-            {
+        // Ignore metadata belonging only to a branch that will not be reconstructed.
+        for rel in rels.iter().filter(|r| used.contains(&r.source)) {
+            if !safe_word(&rel.id) || !safe_word(&rel.rel_type) || !ids.insert((rel.source, rel.id.as_str())) {
                 return false;
             }
-            let Some(source) = self.media_part(rel.source) else { return false };
-            let Some(target) = self.p.media(rel.target) else { return false };
-            let (target, external) = if target.data.is_empty() {
-                let Some(link) = target.link.as_ref().filter(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control)) else {
-                    return false;
-                };
-                (link.clone(), true)
-            } else {
-                let Some(name) = self.media_part(rel.target) else { return false };
-                (crate::opc::relative(&source, &name), false)
-            };
-            let (_, out) = planned.entry(rel.source).or_insert_with(|| (source, RelsOut::default()));
-            out.items.push((rel.id.clone(), rel.rel_type.clone(), target, external));
+            let Some(out) = planned.get_mut(&rel.source) else { return false };
+            out.push((rel.id.clone(), rel.rel_type.clone(), rel.target));
         }
-        for (_, out) in planned.values_mut() {
-            out.items.sort_unstable();
+        for out in planned.values_mut() {
+            out.sort_unstable_by(|a, b| (&a.0, &a.1, a.2.0).cmp(&(&b.0, &b.1, b.2.0)));
         }
         // A shared media part must have one consistent set of relationships across objects.
-        for (id, (_, out)) in &planned {
-            if self.media_relationships.get(id).is_some_and(|old| old != &out.items) {
+        // Compare media identities before allocating output paths, including empty sets.
+        for (id, out) in &planned {
+            if self.media_relationships.get(id).is_some_and(|old| old != out) {
                 return false;
             }
         }
-        for (id, (source, out)) in planned {
-            if let std::collections::hash_map::Entry::Vacant(entry) = self.media_relationships.entry(id) {
-                self.pkg.rels(&source, &out);
-                entry.insert(out.items);
+        let mut order: Vec<_> = planned.keys().copied().collect();
+        order.sort_unstable_by_key(|id| id.0);
+        for id in order {
+            // Every embedded media id was checked above against the immutable presentation.
+            let _ = self.media_part(id);
+        }
+        for (id, items) in planned {
+            if self.media_relationships.contains_key(&id) {
+                continue;
             }
+            let Some(source) = self.media_parts.get(&id) else { return false };
+            let mut out = RelsOut::default();
+            for (rid, ty, target) in &items {
+                let Some(media) = self.p.media(*target) else { return false };
+                let (target, external) = if media.data.is_empty() {
+                    let Some(link) = &media.link else { return false };
+                    (link.clone(), true)
+                } else {
+                    let Some(name) = self.media_parts.get(target) else { return false };
+                    (crate::opc::relative(source, name), false)
+                };
+                out.items.push((rid.clone(), ty.clone(), target, external));
+            }
+            self.pkg.rels(source, &out);
+            self.media_relationships.insert(id, items);
         }
         true
     }
+}
+
+/// Bound strings retained in native data before they become relationship attributes.
+fn safe_word(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control)
 }

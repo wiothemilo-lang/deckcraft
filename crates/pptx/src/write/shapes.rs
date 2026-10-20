@@ -840,6 +840,8 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
     w.close("p:pic");
 }
 
+/// Reconstruct only complete roots or alternate branches, validating their entire graph before
+/// any media or relationship is emitted. Otherwise use the existing visible preview fallback.
 fn opaque(
     w: &mut W,
     x: &mut Exp,
@@ -854,31 +856,44 @@ fn opaque(
 ) {
     // Kept XML is written back as it was when every part it references was kept too, with those
     // parts re-added under this slide's relationship ids.
-    if let Ok(doc) = crate::xml::parse(xml.as_bytes())
-        && x.opaque_rels(rels)
+    if parts.len() <= 1024
+        && rels.len() <= 1024
+        && let Ok(doc) = crate::xml::parse(xml.as_bytes())
+        && matches!(doc.root.local(), "AlternateContent" | "graphicFrame" | "sp" | "grpSp" | "cxnSp")
     {
-        if doc.root.is("AlternateContent") {
-            // A kept `mc:AlternateContent`: both branches go back, so a choice we could not read
-            // is not lost.
-            if alternate_content(w, x, o, cx, s, doc.root, parts) {
-                return;
+        let available = parts
+            .iter()
+            .filter(|(_, _, id)| x.p.media(*id).is_some_and(|m| !m.data.is_empty() || m.link.is_some()))
+            .map(|(id, ..)| id.as_str())
+            .collect();
+        if let Some(used) = crate::read::opaque::retained_refs(&doc.root, &available) {
+            let parts: Vec<_> = parts.iter().filter(|(id, ..)| used.contains(id)).cloned().collect();
+            let roots: Vec<_> = parts.iter().map(|(_, _, id)| *id).collect();
+            if x.opaque_rels(&roots, rels) {
+                if doc.root.is("AlternateContent") {
+                    // A kept `mc:AlternateContent`: both branches go back, so a choice we could not read
+                    // is not lost.
+                    if alternate_content(w, x, o, cx, s, doc.root, &parts) {
+                        return;
+                    }
+                } else if matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
+                    && let Some(ids) = crate::read::rel_refs(&doc.root)
+                        .iter()
+                        .map(|r| {
+                            let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
+                            Some((r.clone(), x.media_rel(o, *m, kind)?))
+                        })
+                        .collect::<Option<std::collections::HashMap<_, _>>>()
+                {
+                    let mut root = doc.root;
+                    set_rel_ids(&mut root, &ids, 0);
+                    ole_fallback(&mut root, x, o, preview);
+                    let id = cx.id_for(s);
+                    set_cnvpr_id(&mut root, id);
+                    w.raw(&root.to_xml());
+                    return;
+                }
             }
-        } else if matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
-            && let Some(ids) = crate::read::rel_refs(&doc.root)
-                .iter()
-                .map(|r| {
-                    let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
-                    Some((r.clone(), x.media_rel(o, *m, kind)?))
-                })
-                .collect::<Option<std::collections::HashMap<_, _>>>()
-        {
-            let mut root = doc.root;
-            set_rel_ids(&mut root, &ids, 0);
-            ole_fallback(&mut root, x, o, preview);
-            let id = cx.id_for(s);
-            set_cnvpr_id(&mut root, id);
-            w.raw(&root.to_xml());
-            return;
         }
     }
     log::warn!("pptx: object '{label}' written as its preview picture");

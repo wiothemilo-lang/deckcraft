@@ -32,12 +32,14 @@ struct Closure {
 /// The parts named by an object's XML, with the complete relationships of each kept part.
 /// A missing or over-budget target rejects that root part instead of emitting dangling links.
 pub(super) fn capture(imp: &mut Imp, part: &Part, el: &El) -> (Parts, Vec<OpaqueRel>) {
+    let start = imp.media.len();
     let mut parts = vec![];
     let mut rels = vec![];
     let mut seen_rels = HashSet::new();
     let mut budget = Budget::default();
     for id in super::rel_refs(el).into_iter().take(MAX_RELS) {
         let Some(rel) = part.rels.get(&id).filter(|r| !r.external) else { continue };
+        let checkpoint = imp.media.len();
         let mut closure = Closure::default();
         if let Some(media) = copy_part(imp, &rel.target, rel.kind == "diagramData", &mut closure, &mut budget, 0) {
             parts.push((id, rel.ty.clone(), media));
@@ -47,10 +49,70 @@ pub(super) fn capture(imp: &mut Imp, part: &Part, el: &El) -> (Parts, Vec<Opaque
                 }
             }
         } else {
+            discard_new(imp, checkpoint, &HashSet::new());
             log::warn!("pptx: kept object part {} has missing, unsupported or over-budget relationships", rel.target);
         }
     }
+    let available = parts.iter().map(|(id, ..)| id.as_str()).collect();
+    let kept = retained_refs(el, &available).unwrap_or_default();
+    parts.retain(|(id, ..)| kept.contains(id));
+    let used = graph_ids(parts.iter().map(|(_, _, id)| *id), &rels);
+    rels.retain(|r| used.contains(&r.source));
+    discard_new(imp, start, &used);
     (parts, rels)
+}
+
+/// Discard only allocations made by this attempt; earlier previews and shared parts stay owned.
+/// Ids and traversal budgets remain spent so rejection cannot restart unbounded work.
+fn discard_new(imp: &mut Imp, start: usize, keep: &HashSet<MediaId>) {
+    let mut removed = HashSet::new();
+    let added = imp.media.split_off(start);
+    for item in added {
+        if keep.contains(&item.id) {
+            imp.media.push(item);
+        } else {
+            removed.insert(item.id);
+        }
+    }
+    imp.media_by_part.retain(|_, id| !removed.contains(id));
+}
+
+/// The references of complete branches only. A normal frame needs every root; an alternate
+/// block can keep valid choices, or its final valid fallback when no choice survives.
+pub(crate) fn retained_refs(el: &El, available: &HashSet<&str>) -> Option<HashSet<String>> {
+    let complete = |e: &El| {
+        let refs = super::rel_refs(e);
+        refs.iter().all(|r| available.contains(r.as_str())).then_some(refs)
+    };
+    if !el.is("AlternateContent") {
+        return complete(el).map(|r| r.into_iter().collect());
+    }
+    let mut choices = 0;
+    let mut used = HashSet::new();
+    let mut fallback = None;
+    for branch in el.elements().filter(|e| e.is("Choice") || e.is("Fallback")) {
+        if let Some(refs) = complete(branch) {
+            if branch.is("Choice") {
+                choices += 1;
+            } else {
+                fallback = Some(refs.clone());
+            }
+            used.extend(refs);
+        }
+    }
+    if choices > 0 { Some(used) } else { fallback.map(|r| r.into_iter().collect()) }
+}
+
+/// Reachable media ids, following each part's outgoing relations once even in cyclic graphs.
+pub(crate) fn graph_ids(roots: impl Iterator<Item = MediaId>, rels: &[OpaqueRel]) -> HashSet<MediaId> {
+    let mut used = HashSet::new();
+    let mut pending: Vec<_> = roots.collect();
+    while let Some(id) = pending.pop() {
+        if used.insert(id) {
+            pending.extend(rels.iter().filter(|r| r.source == id).map(|r| r.target));
+        }
+    }
+    used
 }
 
 /// Relationship strings are retained in the model, so cap their contribution to the closure.
@@ -117,6 +179,7 @@ fn diagram_data(imp: &mut Imp, target: &str) -> Option<MediaId> {
     if let Some(id) = imp.media_by_part.get(&key) {
         return Some(*id);
     }
+    /// Remove stale slide-scoped drawing ids without touching the part's own relationships.
     fn strip(e: &mut El, depth: usize) {
         if depth > crate::xml::MAX_DEPTH {
             return;

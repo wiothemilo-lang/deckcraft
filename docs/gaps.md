@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (opaque SmartArt/OLE parts retain bounded nested relationships through PPTX and native saves; the owned corpus covers a SmartArt data part's image and hyperlink; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque graph clipboard identity and rejection cleanup have regression coverage; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -90,7 +90,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
   `.potx` and `.ppsx`. These structural checks do not replace PowerPoint reference renders.
   `opaque_relationships.rs` covers SmartArt with no cached drawing whose data part points at
   an image and hyperlink (#203), repeated and native saves, shared parts, cycles and damaged
-  graphs. Nested relationships now survive within the import limits (256 parts, 1024 relations,
+  graphs. Cross-document shape/slide paste covers colliding media ids and external links;
+  rejected graphs discard new allocations and export parts while retaining shared media.
+  Nested relationships now survive within the import limits (256 parts, 1024 relations,
   64 MiB and depth 8 per object; 16,384 relation visits per import). Missing, unsupported or
   over-budget graphs still fall back with a log warning; no strict-save mode or new PowerPoint
   validation is claimed, so #203 is not closed in full.
@@ -372,6 +374,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Added opaque graph command regressions for cross-document paste and package checks for rejected import/export data; missing/unsupported/over-budget graphs and strict-save reporting remain |
 | 2026-10-20 | minor | Bounded nested relationships of opaque SmartArt/OLE parts are preserved (#203 partial), including image bytes, hyperlinks and native saves; missing/unsupported/over-budget graphs and strict-save reporting remain |
 | 2026-10-20 | minor | Fixed unbound namespaces in exported modern comments (#974); namespace-aware package checks supplement the owned corpus, which still needs PowerPoint reference renders |
 | 2026-10-20 | minor | Removed media playback option loss (#74): volume, autoplay, loop, rewind, slide span, hidden state and video full screen round-trip through standard timing nodes; groups, remapped ids and malformed values have regression coverage |

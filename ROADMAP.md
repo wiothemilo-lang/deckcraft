@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque SmartArt/OLE parts retain bounded nested relationships through PPTX/native saves; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque part graphs preserve media identity on paste and discard rejected data; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -136,6 +136,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-21 | M2.203: clipboard commands transfer and remap opaque graph media, including external links and colliding ids; rejected import graphs discard new allocations, and export validates complete branches before writing parts. Shared media stays intact; scores unchanged |
 | 2026-10-20 | M2.203: opaque SmartArt/OLE parts keep bounded nested relationships through PPTX/native saves; tests cover a diagram data part's image and hyperlink, repeated saves, shared parts and cycles. Missing/unsupported/over-budget graphs and strict-save reporting remain; scores unchanged |
 | 2026-10-20 | M2.974: modern-comment PPTX parts declare their text and relationship namespaces; namespace-aware checks cover all exported XML/relationship parts and save/reopen/save in PPTX, POTX and PPSX. Comments row and readiness scores unchanged |
 | 2026-10-20 | M2.74: control-server rejection tests read the reply before another write can race with socket closure; a separate authenticated pipeline check proves a trailing request never reaches the UI queue. Feature scores unchanged |
@@ -250,6 +251,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Opaque graph clipboard and rejection boundaries covered by command/package regressions; no new hidden rejected allocations or export parts, and no change to feature scores |
 | 2026-10-20 | minor | Bounded opaque part graphs retained (#203 partial); media-id traversal includes nested sources and targets so cleanup/copy keep the resources. Readiness percentages unchanged |
 | 2026-10-20 | minor | Modern-comment PPTX namespace failure fixed (#974), adapted from upstream #986; package namespace checks cover first and second saves. Readiness scores unchanged |
 | 2026-10-20 | trivial | Control-server CI tests distinguish a single-line rejection from a pipelined TCP reset; readiness scores unchanged |

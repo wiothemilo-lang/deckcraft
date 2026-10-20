@@ -55,7 +55,7 @@ pub struct Exp<'a> {
     pub pkg: PackageOut,
     media_parts: HashMap<MediaId, String>,
     /// Relationships already emitted for shared opaque media parts.
-    media_relationships: HashMap<MediaId, Vec<(String, String, String, bool)>>,
+    media_relationships: HashMap<MediaId, Vec<(String, String, MediaId)>>,
     n_image: u32,
     n_media: u32,
     n_chart: u32,
