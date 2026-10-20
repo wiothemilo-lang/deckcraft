@@ -890,7 +890,7 @@ fn opaque(
             p.ph = None;
             p.geom = Geom::preset("rect");
             p.fill = Some(Fill::None);
-            p.text = None;
+            // The text of a kept object's fallback stays: it is what the shape showed.
             sp(w, x, o, id, &p, false);
         }
     }
@@ -912,11 +912,13 @@ fn alternate_content(
     let mut ids: HashMap<String, String> = HashMap::new();
     for r in crate::read::rel_refs(&root) {
         let Some((_, kind, m)) = parts.iter().find(|(id, ..)| id == &r) else { continue };
-        let Some(new) = x.media_rel(o, *m, kind) else { return false };
+        // A part we cannot write: the branch that uses it is dropped below.
+        let Some(new) = x.media_rel(o, *m, kind) else { continue };
         ids.insert(r, new);
     }
     let id = cx.id_for(s);
-    let mut kept = 0usize;
+    let mut choices = 0usize;
+    let mut fallback: Option<crate::xml::El> = None;
     let mut out = Vec::with_capacity(root.children.len());
     for c in std::mem::take(&mut root.children) {
         match c {
@@ -929,20 +931,32 @@ fn alternate_content(
                 if b.is("Fallback") {
                     // The branch the shape shows: it takes the shape's own id.
                     set_cnvpr_id(&mut b, id);
+                    // Kept for the case where no choice survives: an `mc:AlternateContent`
+                    // without a choice is not valid, and then the fallback's content goes on
+                    // its own. The copy is taken once per block, which is rare.
+                    fallback = Some(b.clone());
                 } else {
                     // The branch we could not read: its shapes get ids of their own, so they
                     // cannot clash with the ids of the deck's shapes.
                     renumber_cnvprs(&mut b, cx.ids);
+                    choices += 1;
                 }
-                kept += 1;
                 out.push(Node::El(b));
             }
             other => out.push(other),
         }
     }
     root.children = out;
-    if kept == 0 {
-        return false;
+    if choices == 0 {
+        // An `mc:AlternateContent` needs a choice (ECMA-376 Part 3): the fallback's content goes
+        // on its own, which every reader takes.
+        let Some(fb) = fallback else { return false };
+        for c in &fb.children {
+            if let Node::El(e) = c {
+                w.raw(&e.to_xml());
+            }
+        }
+        return true;
     }
     w.raw(&root.to_xml());
     true

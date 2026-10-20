@@ -2,7 +2,8 @@
 //! hidden slide, slide-number and date fields, ink, 3-D models, and animation repeat, bounce and triggers.
 //!
 //! Relationship-bearing SmartArt and OLE parts stay with issue #203. Media playback options stay
-//! with #74. Animation rewind (`cTn fill="remove"`) stays with #77. This file does not assert those.
+//! with #74: the flags are not written back, so this file does not assert them. The animation
+//! rewind flag (`cTn fill="remove"`) round-trips (see `roundtrip.rs`), so it is no longer a gap.
 
 use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
