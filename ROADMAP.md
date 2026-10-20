@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (a failed command puts back what it changed outside the presentation, panic or not; a `.slidecraft` file keeps its own container and the file dialogs list it; the stale #70, #77 and EMF+ mentions are gone; previous: minor, progress log: the undo limit, a failed command's side effects, a legacy `.slidecraft` file, an unreadable PPTX choice, the animation index and the AV1 decoder's state; previous: minor, localization re-scored ~8% → ~20%: the string catalog, the language setting (#15) and a Vietnamese draft landed; Languages table, Upcoming item 3 and the progress log updated; previous: major, community PR wave 2026-10-14: ~60 landed items in the progress log, among them the Font, Paragraph, Photo Album, theme colour and font and Date and Time dialogs, presenter and show controls, the SmartArt Text Pane and PPTX corpus slices; breadth 84% after `cargo xtask parity`, ready stays ~55%, stage stays alpha; duplicated rows and headers folded; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (failed commands restore state outside the presentation; legacy .slidecraft containers and file-dialog entries are retained; media playback options survive PPTX save/reopen, including video full screen; control-server tests distinguish rejection replies from pipelined TCP resets; rewind and EMF+ are no longer listed as round-trip losses; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -37,8 +37,8 @@ Calibration is the same as for the full number (see [docs/target-app-parity.md](
 `.pptx`, present, add tables and charts, share as PDF, review. Core workflows work end to end (build a deck, open and save `.pptx`, present with
 transitions, animations, media and presenter view, export PDF), but depth, fidelity and polish
 have known gaps, and PPTX has never been tested on a corpus of real decks. Beta needs ~75% ready
-and no blocking gap in `.pptx`: the real-deck corpus, the round-trip loss (#74, the media
-playback flags), EMF/SVG pictures, the data-loss and startup-crash bugs (#60, #40, #59) and the beta list in
+and no blocking gap in `.pptx`: the real-deck corpus, remaining round-trip losses (including #203),
+EMF/SVG pictures, the data-loss and startup-crash bugs (#60, #40, #59) and the beta list in
 [docs/roadmap.md](docs/roadmap.md).
 
 ## By dimension
@@ -116,8 +116,9 @@ Ranked; detail and the full beta plan in [docs/roadmap.md](docs/roadmap.md).
 2. **PPTX on real decks:** the owned corpus now round-trips comments, links and actions, custom
    shows, rotated groups, inherited placeholders, text effects and body layout, theme effects,
    fills, bevels, connectors, tables, charts, animations, media, sections, masters, 3-D models
-   and animation bounce end. Still open: a corpus of real decks, #74 (the media playback
-   flags), MicroType Express font subsets and SVG. 36–64 h.
+   and animation bounce end. Comments, media options and rewind survive save/reopen (#70, #74,
+   #77). Still open: a corpus of real decks, relationship-bearing SmartArt/OLE (#203),
+   MicroType Express font subsets and SVG. 36–64 h.
 3. **Localization:** Vietnamese's remaining strings and native review, then zh-Hans, es, fr, de, ja
    with IME on the landed catalog (#15 is in). 19–32 h plus review.
 4. **Output:** vector PDF, printing. 10–16 h.
@@ -134,6 +135,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-20 | M2.74: control-server rejection tests read the reply before another write can race with socket closure; a separate authenticated pipeline check proves a trailing request never reaches the UI queue. Feature scores unchanged |
+| 2026-10-20 | M2.74: PPTX media playback settings survive save/reopen through standard audio/video timing nodes, including video full screen; options stay attached to the emitted shape ids, with bounded import and regression tests (#74) |
 | 2026-10-20 | trivial | Progress log: a failed command puts back what it changed outside the presentation, panic or not; a `.slidecraft` file keeps its own container and the file dialogs list it; the stale #70/#77 and EMF+ mentions are gone from the roadmap. Feature scores unchanged |
 | 2026-10-20 | minor | Progress log: the undo limit from the preferences is honoured; a failed command leaves no dialog request, clipboard or painter behind; a `.slidecraft` file written before the rename opens again; a PPTX choice in a namespace we cannot read survives a save; the animation timeline and the render filter check are indexed; the AV1 decoder's state is documented. Feature scores unchanged |
 | 2026-10-18 | Interface localization: `crates/engine/src/i18n` translates command, dialog and Backstage ids and the English UI strings at the draw sites (a missing key stays English), Preferences ▸ Language picks English or Tiếng Việt, unset follows the system locale (#15), and coverage tests check every command label, ribbon tab, dialog title and side-menu page. Vietnamese ships with 653 translations, ~60% of the measured UI strings, unreviewed |
@@ -244,6 +247,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | trivial | Control-server CI tests distinguish a single-line rejection from a pipelined TCP reset; readiness scores unchanged |
+| 2026-10-20 | minor | Media playback option loss (#74) closed; full-screen video and independent clip targeting covered. Readiness percentages unchanged |
 | 2026-10-18 | minor | Localization ~8% → ~20%: the catalog, the language setting (#15) and a Vietnamese draft landed; Languages table, Upcoming item 3, the beta plan and the progress log updated |
 | 2026-10-16 | trivial | Progress log: PNG export with a transparent background (#784) |
 | 2026-10-16 | trivial | Progress log: a `.ppsx` from the system starts the slide show (#862) |

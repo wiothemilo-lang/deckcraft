@@ -569,7 +569,72 @@ fn para_count(s: &Shape) -> u32 {
     s.text.as_ref().map(|t| t.paragraphs.iter().filter(|p| !p.is_empty()).count()).unwrap_or(0).min(10_000) as u32
 }
 
-/// Write `p:timing` for a slide's animations.
+/// Only playback settings, without cloning a clip's bookmarks or media data. Shape serialization
+/// records the actual emitted id so two clips with the same model id still get separate nodes.
+pub struct MediaNode {
+    spid: u32,
+    video: bool,
+    volume: f64,
+    autoplay: bool,
+    loop_play: bool,
+    rewind: bool,
+    play_across_slides: bool,
+    hide_while_not_playing: bool,
+    full_screen: bool,
+}
+
+impl MediaNode {
+    pub fn new(m: &deckcraft_model::MediaClip, spid: u32) -> Option<Self> {
+        let volume = if m.volume.is_finite() { m.volume.clamp(0.0, 1.0) } else { 1.0 };
+        let full_screen = m.video && m.full_screen;
+        if !m.autoplay && !m.loop_play && !m.rewind && !m.play_across_slides && !m.hide_while_not_playing && !full_screen && volume == 1.0 {
+            return None;
+        }
+        Some(Self {
+            spid,
+            video: m.video,
+            volume,
+            autoplay: m.autoplay,
+            loop_play: m.loop_play,
+            rewind: m.rewind,
+            play_across_slides: m.play_across_slides,
+            hide_while_not_playing: m.hide_while_not_playing,
+            full_screen,
+        })
+    }
+}
+
+/// One media shape's playback options, as PowerPoint writes them: `vol` in thousandths of a
+/// percent, the slide span, whether the clip is shown when stopped, and the common time node's
+/// loop (`repeatCount`), rewind (`fill="remove"`) and start (a zero delay starts by itself).
+/// ECMA-376-1 sections 19.5.29 and 19.5.93 define the media node and video `fullScrn` flag.
+fn media_node(w: &mut W, ids: &mut Ids, m: &MediaNode) {
+    let tag = if m.video { "p:video" } else { "p:audio" };
+    w.open(tag, A::new().t("fullScrn", m.full_screen));
+    w.open(
+        "p:cMediaNode",
+        A::new()
+            .a("vol", (m.volume * 100_000.0).round() as u32)
+            .a("numSld", if m.play_across_slides { 999 } else { 1 })
+            .a("showWhenStopped", if m.hide_while_not_playing { "0" } else { "1" }),
+    );
+    let mut ctn = A::new().a("id", ids.next()).a("fill", if m.rewind { "remove" } else { "hold" }).a("display", "0").a("masterRel", "sameClick");
+    if m.loop_play {
+        ctn = ctn.a("repeatCount", "indefinite");
+    }
+    w.open("p:cTn", ctn);
+    w.open0("p:stCondLst");
+    w.empty("p:cond", A::new().a("delay", if m.autoplay { "0" } else { "indefinite" }));
+    w.close("p:stCondLst");
+    w.close("p:cTn");
+    w.open0("p:tgtEl");
+    w.empty("p:spTgt", A::new().a("spid", m.spid));
+    w.close("p:tgtEl");
+    w.close("p:cMediaNode");
+    w.close(tag);
+}
+
+/// Write `p:timing` for a slide's animations and media playback options.
 pub fn timing(w: &mut W, x: &mut Exp, anims: &[Animation], shapes: &[Shape], idmap: &IdMap) {
     let mut grp_count: std::collections::HashMap<u32, u32> = Default::default();
     let mut main: Vec<Eff> = vec![];
@@ -621,7 +686,9 @@ pub fn timing(w: &mut W, x: &mut Exp, anims: &[Animation], shapes: &[Shape], idm
             None => main.extend(effs),
         }
     }
-    if main.is_empty() && triggered.is_empty() {
+    // Media playback options (`media.options`) live here in the timing tree, not in `p14:media`
+    // (#74): a `p:video`/`p:audio` node per media shape that has any to record.
+    if main.is_empty() && triggered.is_empty() && idmap.media.is_empty() {
         return;
     }
     let mut ids = Ids(0);
@@ -691,6 +758,9 @@ pub fn timing(w: &mut W, x: &mut Exp, anims: &[Animation], shapes: &[Shape], idm
         trig_cond(w);
         w.close("p:nextCondLst");
         w.close("p:seq");
+    }
+    for m in &idmap.media {
+        media_node(w, &mut ids, m);
     }
     w.close("p:childTnLst");
     w.close("p:cTn");

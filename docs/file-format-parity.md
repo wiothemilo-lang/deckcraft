@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (the animation rewind flag (#77) round-trips, so it is no longer a round-trip loss; the media playback options (#74) entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen); the EMF+ line says that the records inside a *dual* EMF/WMF are ignored on purpose; previous: major, community PR wave 2026-10-14: seven owned PPTX corpus files, embedded fonts, EMF/WMF clip regions, threaded comments (#70), chart trendlines and workbooks (#335), SmartArt written as a diagram, tags and custom XML kept, picture export DPI; duplicated rows and headers folded; previous: trivial, lines in scaled groups, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; regression tests cover groups, duplicate ids, event starts and hostile values; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -76,7 +76,7 @@ the round trip even though DeckCraft doesn't model it.
 | Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept, with their embedded workbook (#335); edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
 | SmartArt (`dgm`) | the drawing part as a group (text laid out on its `dsp:txXfrm` rectangle), and the outline from the data model (Text Pane) | as a diagram: data model from the outline; layout, quick style and colour parts (the file's own kept until the layout is switched); the group as the cached drawing | DeckCraft's layout definitions are simple; a diagram without a cached drawing isn't drawn. SmartArt kept only as XML, without its relationship parts, still loses the drawing and data parts (#203) |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
-| Audio / video (`p14:media`, trim, fades, bookmarks) | yes | partly | Trim, fades and bookmarks round-trip; the playback flags (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen) are lost on save (#74) |
+| Audio / video (`p14:media`, trim, fades, bookmarks; timing-tree playback options) | yes | yes | Volume, autoplay, loop, rewind, play across slides, hide while stopped and video full screen round-trip through `p:audio`/`p:video` nodes (`media_options.rs`); complex playback schedules are not modeled |
 | Ink (`contentPart`) | yes | as a group of freeform lines | PowerPoint sees shapes, not ink |
 | Transitions incl. p14/p15 (Vortex, Morph…) | all 48 | all 48 | `every_transition_kind_round_trips` |
 | Animations: timing tree, build paragraphs, triggers, motion paths | yes (flattened to the Animation Pane list) | yes (rebuilt) | `every_animation_effect_survives`; repeat, triggers, bounce end and rewind kept |
@@ -96,7 +96,8 @@ the round trip even though DeckCraft doesn't model it.
    `corpus_kinds.rs` already check open → save → reopen (parts and text) for decks we author:
    tables, charts, animations, media, sections and masters/layouts among them. Still needed:
    render checks and a PowerPoint reference render for each (owner runs PowerPoint).
-2. The round-trip losses above (#74; #70 and #77 are closed).
+2. Remaining round-trip losses, including relationship-bearing SmartArt/OLE (#203); comments,
+   media playback options and rewind are preserved (#70, #74, #77).
 3. SVG rendering. EMF+ records inside a *dual* EMF/WMF are ignored on purpose — the plain EMF
    records carry the same picture; an EMF+ only file plays every EMF+ drawing record.
 
@@ -104,6 +105,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Media playback options (#74) read and written through standard timing nodes, including `p:video fullScrn`; tests cover each option, animation coexistence, groups, duplicate model ids, manual start conditions and non-finite/bounded volume |
 | 2026-10-20 | minor | The animation rewind flag round-trips (#77 closed): the reader takes `cTn fill="remove"` and the writer emits it. The media playback options (#74) entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). The EMF+ note says the records inside a *dual* EMF/WMF are ignored on purpose, since the plain EMF records carry the same picture |
 | 2026-10-15 | trivial | PPTX interactive timing sequences keep later On Click steps and paragraph click builds (`trigger_steps.rs`); mixed starts and independent buttons survive import/edit/save/reopen |
 | 2026-10-15 | minor | A `.pptx` slide that can't be read is reported instead of dropped in silence: `file.open` and `file.openBytes` return `lostSlides`, the app shows a message and opens a repaired copy (Save asks for a new name), and `deckcraft-cli` warns on stderr (#203) |

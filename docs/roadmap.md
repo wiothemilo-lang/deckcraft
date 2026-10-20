@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (the animation rewind flag (#77) round-trips, so the alpha gate row, the current focus and beta item 3 keep only the media playback options (#74); the EMF+ records leave the open list, they are drawn; previous: minor, localization: the string catalog, the language setting (#15) and Vietnamese landed; beta item 6 narrows to five languages at 19–32 h, M14 and the after-beta count updated; previous: major, community PR wave 2026-10-14: PPTX corpus, presenter and show controls, review navigation, starter decks, Grid Options and New Window, WordArt gallery and handles, pen pressure; beta items 9 and 10 narrowed; duplicated rows and headers folded; previous: minor, core-workflow alpha gate added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; working round-trip features are separated from remaining workflow shortfalls; rewind round-trips and EMF+ records render; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -16,7 +16,7 @@ points and lead the beta plan.
 | Core workflow | Works end to end? | Evidence | Hours to full pass |
 |---|---|---|---|
 | Build a deck from scratch (theme, layouts, titles and bullets, shapes, pictures from file), save, close and reopen it | yes | Commands for all of it; `.deckcraft` and `.pptx` round-trip tests (`crates/pptx/tests/roundtrip.rs`, `crates/format`); AutoRecover. Close discards edits without asking (#60, PR #75); image *paste* fails on Windows/Linux (#53), though insert-from-file works | 1–3 |
-| Open a colleague's `.pptx`, edit it, save it back as `.pptx` that PowerPoint opens | partial (not blocking) | The reader is lenient and keeps unknown objects. Files open in PowerPoint without repair (checked 2026-10-06). But only generated decks have been tested; the media playback options are lost on save (#74). Comment threads (#70) and the animation rewind flag (#77) round-trip | 31–55 |
+| Open a colleague's `.pptx`, edit it, save it back as `.pptx` that PowerPoint opens | partial (not blocking) | The reader is lenient and keeps unknown objects. Files open in PowerPoint without repair (checked 2026-10-06). Comment threads, media options and rewind round-trip (#70, #74, #77). But only generated decks have been tested | 31–55 |
 | Present: full-screen show with transitions, animations, media, presenter view with notes, next slide and timer | yes | 48/48 transitions, 64 effects, triggers, builds, media playback, presenter window, See All Slides and zoom. The presenter timer pauses and resets, and notes have a size control. A custom show plays only its slides. Typing a slide number during the show shows it, and Enter goes there. Presenter view isn't placed on the second display automatically (drag it there; #433) | 2–4 |
 | Add business content: tables, charts with their data, simple diagrams | partial (not blocking) | Tables with styles, merge/split, all D or P. Charts insert with the common types and edit data in the Chart Data dialog (P0 partial); SmartArt is basic (pre-drawn shapes) | 12–20 |
 | Share the deck: PDF of slides, notes or handouts; images | yes | `file.export` PDF with text layer, links, bookmarks, handouts 1–9; PNG/JPEG. Artwork is raster in the PDF; no direct print (print the PDF) | 10–16 |
@@ -31,7 +31,7 @@ points and lead the beta plan.
    actions, custom shows, rotated groups, inherited placeholders, text effects and body layout,
    theme effects, fills, bevels, connectors, 3-D models and animation bounce end, and keeps notes-
    and handout-master text, paragraph defaults and action sounds. Still open: decks from outside
-   this repo, the media playback options on save (#74), relationship-bearing SmartArt and OLE
+   this repo, relationship-bearing SmartArt and OLE
    (#203) and SVG. 31–55 h.
 3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
    open-with (#68), font lookup (#80), Ukrainian (#34, redone against the catalog). 4–8 h.
@@ -45,7 +45,7 @@ Beta means ~75% ready for real work and opening and saving PowerPoint's `.pptx` 
 |---|---|---|---|
 | 1 | Stability: #60, #40/#59, soak and fuzz the editor | 10–20 | Stability 60 → 85% |
 | 2 | PPTX real-deck corpus and fixes | 20–35 | File formats 58 → 75% |
-| 3 | PPTX round-trip losses (#74), `.potx`/`.ppsx`/`.pptm` content types, MicroType embedded-font subsets | 8–15 | File formats → 80% |
+| 3 | Remaining PPTX round-trip losses (comments, media options and rewind now preserved), `.potx`/`.ppsx`/`.pptm` content types, MicroType embedded-font subsets | 8–15 | File formats → 80% |
 | 4 | EMF/WMF and SVG pictures | 8–14 | File formats, Pictures |
 | 5 | Vector PDF, printing | 10–16 | File formats, Files |
 | 6 | zh-Hans, es, fr, de, ja (with IME) on the landed catalog | 19–32 | Localization ~20 → ~45% |
@@ -115,6 +115,8 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | trivial | Separated working round-trip features from the remaining workflow shortfalls; readiness scores unchanged |
+| 2026-10-20 | minor | Media playback options (#74), including full-screen video, round-trip through standard timing nodes. Core workflow and beta item 3 narrowed; overall estimates unchanged pending a new calibration |
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips, so the alpha gate row, the current focus, beta item 3 and the 2026-10-07 history keep only the media playback options (#74); the EMF+ records leave the open list (they are drawn) |
 | 2026-10-18 | minor | Localization: the string catalog, the language setting and Vietnamese landed (#15); beta item 6 narrows to five languages (19–32 h) and the dimension reads ~20% |
 | 2026-10-15 | trivial | PPTX trigger click steps survive save, including by-paragraph builds. Interactive-deck gaps remain media actions, audio triggers and click-box geometry; milestone scope and feature scores unchanged |
