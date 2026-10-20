@@ -15,6 +15,8 @@ use crate::xml::{A, Node, W};
 /// cNvPr ids for one part.
 pub struct IdMap {
     pub map: HashMap<ShapeId, u32>,
+    /// Playback settings tied to the ids actually emitted, including remapped duplicate ids.
+    pub media: Vec<super::timing::MediaNode>,
     next: u32,
 }
 
@@ -39,7 +41,7 @@ impl IdMap {
             used.insert(id);
             map.entry(s.id).or_insert(id);
         });
-        IdMap { map, next }
+        IdMap { map, media: Vec::new(), next }
     }
     pub fn get(&self, id: ShapeId) -> Option<u32> {
         self.map.get(&id).copied()
@@ -419,6 +421,9 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
         ShapeKind::Media(m) => {
             let id = cx.id_for(s);
             media(w, x, o, id, s, m);
+            if let Some(node) = super::timing::MediaNode::new(m, id) {
+                cx.ids.media.push(node);
+            }
         }
         ShapeKind::Model3d { media, poster } => write_model(w, x, o, cx, s, *media, *poster),
         ShapeKind::Ink { strokes } => {

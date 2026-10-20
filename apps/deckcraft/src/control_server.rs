@@ -320,7 +320,11 @@ mod tests {
     }
 
     fn hello(w: &mut impl Write, token: &str) {
-        writeln!(w, r#"{{"id":0,"method":"{HELLO}","params":{{"token":"{token}"}}}}"#).unwrap();
+        try_hello(w, token).unwrap();
+    }
+
+    fn try_hello(w: &mut impl Write, token: &str) -> std::io::Result<()> {
+        writeln!(w, r#"{{"id":0,"method":"{HELLO}","params":{{"token":"{token}"}}}}"#)
     }
 
     fn reply(r: &mut BufReader<TcpStream>) -> Option<Value> {
@@ -480,8 +484,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(4);
         loop {
             let (mut dr, mut dw) = client(addr);
-            hello(&mut dw, TOKEN);
-            if reply(&mut dr).is_some_and(|v| v["ok"] == true) {
+            // A still-busy listener can close before the handshake is written. That reset is
+            // another refused attempt, not a failure of the slot-release assertion below.
+            if try_hello(&mut dw, TOKEN).is_ok() && reply(&mut dr).is_some_and(|v| v["ok"] == true) {
                 writeln!(dw, r#"{{"id":2,"method":"m"}}"#).unwrap();
                 if reply(&mut dr).is_some_and(|v| v["ok"] == true) {
                     break;

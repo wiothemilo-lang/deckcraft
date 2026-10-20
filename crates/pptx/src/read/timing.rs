@@ -1,7 +1,9 @@
 //! Slide transitions (`p:transition`) and animations (`p:timing`).
 
-use deckcraft_model::Shape;
+use std::collections::HashMap;
+
 use deckcraft_model::anim::{AnimClass, AnimStart, Animation, TextBuild, Transition};
+use deckcraft_model::{Shape, ShapeId, ShapeKind};
 
 use super::shapes::IdCtx;
 use super::{Imp, Part, dml};
@@ -183,4 +185,76 @@ pub fn animations(imp: &mut Imp, part: &Part, ctx: &IdCtx, timing: &El, _shapes:
         out.push((a, file_id, grp));
     }
     out.into_iter().map(|(a, _, _)| a).collect()
+}
+
+/// Media playback options from the timing tree's `p:video`/`p:audio` nodes (#74): volume,
+/// play-across-slides, hide-while-not-playing, loop, rewind, video full screen and automatic start. The nodes
+/// sit beside the main sequence and carry them for clips whose `p14:media` element only holds
+/// trim, fades and bookmarks.
+pub fn media_options(timing: &El, ctx: &IdCtx, shapes: &mut [Shape]) {
+    // Index only timing nodes that target an imported shape. Walk the shape tree once rather
+    // than searching it again for every node in a hostile timing part.
+    let mut nodes = HashMap::new();
+    collect_media(timing, ctx, &mut nodes, false, 0);
+    apply_media(shapes, &nodes, 0);
+}
+
+fn collect_media<'a>(e: &'a El, ctx: &IdCtx, out: &mut HashMap<ShapeId, (&'a El, bool)>, waits_for_input: bool, depth: usize) {
+    if depth > 64 || out.len() >= 10_000 {
+        return;
+    }
+    let waits_for_input = waits_for_input
+        || (e.is("cTn")
+            && (matches!(e.attr("nodeType"), Some("interactiveSeq" | "clickEffect"))
+                || e.child("stCondLst").is_some_and(|l| {
+                    l.children_named("cond")
+                        .any(|c| matches!(c.attr("evt"), Some("onClick" | "onDblClick" | "onMouseOver" | "onMouseOut" | "onNext" | "onPrev")))
+                })));
+    if matches!(e.local(), "video" | "audio")
+        && let Some(id) = e.path(&["cMediaNode", "tgtEl", "spTgt"]).and_then(|t| t.u32("spid")).and_then(|s| ctx.lookup(s))
+    {
+        out.entry(id).or_insert((e, waits_for_input));
+    }
+    for c in e.elements() {
+        collect_media(c, ctx, out, waits_for_input, depth + 1);
+    }
+}
+
+fn apply_media(shapes: &mut [Shape], nodes: &HashMap<ShapeId, (&El, bool)>, depth: usize) {
+    if depth > 32 {
+        return;
+    }
+    for s in shapes {
+        if let ShapeKind::Media(clip) = &mut s.kind
+            && let Some((n, waits_for_input)) = nodes.get(&s.id)
+            && let Some(mn) = n.child("cMediaNode")
+        {
+            if let Some(v) = mn.f64("vol") {
+                clip.volume = (v / 100_000.0).clamp(0.0, 1.0);
+            }
+            if let Some(n) = mn.u32("numSld") {
+                clip.play_across_slides = n > 1;
+            }
+            if let Some(b) = mn.bool("showWhenStopped") {
+                clip.hide_while_not_playing = !b;
+            }
+            if n.is("video") {
+                clip.full_screen = n.bool("fullScrn").unwrap_or(false);
+            }
+            if let Some(tn) = mn.child("cTn") {
+                clip.loop_play = tn.attr("repeatCount") == Some("indefinite");
+                clip.rewind = tn.attr("fill") == Some("remove");
+                // Event-driven or ancestor click sequences do not start on slide entry. Only
+                // a finite, nonnegative delay with no event/target is an automatic start.
+                clip.autoplay = !waits_for_input
+                    && tn.child("stCondLst").is_some_and(|l| {
+                        l.children_named("cond")
+                            .any(|c| c.attr("evt").is_none() && c.f64("delay").is_some_and(|d| d >= 0.0) && c.elements().next().is_none())
+                    });
+            }
+        }
+        if let Some(children) = s.children_mut() {
+            apply_media(children, nodes, depth + 1);
+        }
+    }
 }
