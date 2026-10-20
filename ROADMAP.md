@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; regression tests cover groups, duplicate ids, event starts and hostile values; control-server CI tests distinguish rejection replies from pipelined TCP resets; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (failed commands restore state outside the presentation; legacy .slidecraft containers and file-dialog entries are retained; media playback options survive PPTX save/reopen, including video full screen; control-server tests distinguish rejection replies from pipelined TCP resets; rewind and EMF+ are no longer listed as round-trip losses; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -117,7 +117,7 @@ Ranked; detail and the full beta plan in [docs/roadmap.md](docs/roadmap.md).
    shows, rotated groups, inherited placeholders, text effects and body layout, theme effects,
    fills, bevels, connectors, tables, charts, animations, media, sections, masters, 3-D models
    and animation bounce end. Comments, media options and rewind survive save/reopen (#70, #74,
-   #77). Still open: a corpus of real decks, relationship-bearing SmartArt/OLE (#203), EMF+ records,
+   #77). Still open: a corpus of real decks, relationship-bearing SmartArt/OLE (#203),
    MicroType Express font subsets and SVG. 36–64 h.
 3. **Localization:** Vietnamese's remaining strings and native review, then zh-Hans, es, fr, de, ja
    with IME on the landed catalog (#15 is in). 19–32 h plus review.
@@ -137,6 +137,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 |---|---|
 | 2026-10-20 | M2.74: control-server rejection tests read the reply before another write can race with socket closure; a separate authenticated pipeline check proves a trailing request never reaches the UI queue. Feature scores unchanged |
 | 2026-10-20 | M2.74: PPTX media playback settings survive save/reopen through standard audio/video timing nodes, including video full screen; options stay attached to the emitted shape ids, with bounded import and regression tests (#74) |
+| 2026-10-20 | trivial | Progress log: a failed command puts back what it changed outside the presentation, panic or not; a `.slidecraft` file keeps its own container and the file dialogs list it; the stale #70/#77 and EMF+ mentions are gone from the roadmap. Feature scores unchanged |
 | 2026-10-20 | minor | Progress log: the undo limit from the preferences is honoured; a failed command leaves no dialog request, clipboard or painter behind; a `.slidecraft` file written before the rename opens again; a PPTX choice in a namespace we cannot read survives a save; the animation timeline and the render filter check are indexed; the AV1 decoder's state is documented. Feature scores unchanged |
 | 2026-10-18 | Interface localization: `crates/engine/src/i18n` translates command, dialog and Backstage ids and the English UI strings at the draw sites (a missing key stays English), Preferences ▸ Language picks English or Tiếng Việt, unset follows the system locale (#15), and coverage tests check every command label, ribbon tab, dialog title and side-menu page. Vietnamese ships with 653 translations, ~60% of the measured UI strings, unreviewed |
 | 2026-10-17 | The loopback control channel requires a token (`control.hello`) before it answers any method, so another process on the machine can no longer drive the app, quit it with unsaved work, or make it read and write files; `deckcraft-web` and `mcp` are in the wasm check; the slide show takes the prefetched frame without blocking; both painters disarm through commands |

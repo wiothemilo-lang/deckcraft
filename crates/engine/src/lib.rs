@@ -458,7 +458,7 @@ pub struct Clipboard {
 /// clipboard it fills, the painters it arms, the tool it leaves in a state. A command that
 /// fails puts them back, so a failed command leaves nothing behind but its error.
 #[derive(Clone)]
-struct Outside {
+pub(crate) struct Outside {
     ui_requests: Vec<UiRequest>,
     clipboard: Clipboard,
     painter: Option<(cmd::format::Painted, bool)>,
@@ -642,10 +642,9 @@ impl Session {
         }
         let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone()));
         let outer = self.depth == 0;
-        // What the command may change outside the presentation: the UI requests it sends, the
-        // clipboard it fills, the painters it arms. A command that fails must leave them as
-        // they were, or the UI opens a dialog for an edit that never happened.
-        let outside = if outer { Some(self.outside()) } else { None };
+        // What the command changes outside the presentation (the UI requests it sends, the
+        // clipboard it fills, the painters it arms) is captured by the guard, which puts it back
+        // whether the command returns an error or panics.
         self.depth += 1;
         let r = (spec.run)(self, params);
         self.depth -= 1;
@@ -654,22 +653,18 @@ impl Session {
             Err(e) => {
                 // A command made of several edits can fail after some of them went through; the
                 // outermost one puts the presentation back, so a failed command changes nothing.
-                if outer {
-                    if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
-                        && st.uid == uid
-                    {
-                        let doc_changed = !Arc::ptr_eq(&old, &st.doc);
-                        let sel_changed = st.selection != sel;
-                        if doc_changed {
-                            st.doc = old;
-                        }
-                        st.selection = sel;
-                        if doc_changed || sel_changed {
-                            st.revision += 1;
-                        }
+                if outer
+                    && let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
+                    && st.uid == uid
+                {
+                    let doc_changed = !Arc::ptr_eq(&old, &st.doc);
+                    let sel_changed = st.selection != sel;
+                    if doc_changed {
+                        st.doc = old;
                     }
-                    if let Some(saved) = outside {
-                        self.restore_outside(saved);
+                    st.selection = sel;
+                    if doc_changed || sel_changed {
+                        st.revision += 1;
                     }
                 }
                 return Err(e);
@@ -701,7 +696,7 @@ impl Session {
     }
 
     /// What the commands may change outside the presentation, as it is now.
-    fn outside(&self) -> Outside {
+    pub(crate) fn outside(&self) -> Outside {
         Outside {
             ui_requests: self.ui_requests.clone(),
             clipboard: self.clipboard.clone(),
@@ -713,7 +708,7 @@ impl Session {
     }
 
     /// Put back what a failed command changed outside the presentation.
-    fn restore_outside(&mut self, saved: Outside) {
+    pub(crate) fn restore_outside(&mut self, saved: Outside) {
         self.ui_requests = saved.ui_requests;
         self.clipboard = saved.clipboard;
         self.painter = saved.painter;

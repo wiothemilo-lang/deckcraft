@@ -1,7 +1,10 @@
 //! A micro-benchmark of the per-frame cost of a show's animation timeline.
 //!
 //! Every frame of a show asks the timeline for the state of every shape (and of each of its
-//! paragraphs), so this is the cost that decides whether a busy slide animates smoothly.
+//! paragraphs), so this is the cost that decides whether a busy slide animates smoothly. The
+//! old way of finding the effects of a shape (scan the whole timeline, sort it, allocate) is
+//! measured next to the new one, in the same binary.
+//!
 //! Run it with:
 //!
 //! ```text
@@ -53,13 +56,15 @@ fn busy_slide(shapes: u32, per_shape: u32) -> Slide {
 }
 
 /// What the show does for one frame: the state of every shape, then of each of its paragraphs
-/// (the same calls the show's canvas makes).
-fn frame(tl: &Timeline, ids: &[ShapeId], step: usize, t: f64, plays: &[TriggerPlay], stamps: &[StepStamp]) -> f64 {
+/// (the same calls the show's canvas makes). `old` asks the timeline the way it did before it
+/// grew its index.
+fn frame(tl: &Timeline, ids: &[ShapeId], step: usize, t: f64, plays: &[TriggerPlay], stamps: &[StepStamp], old: bool) -> f64 {
     let mut sum = 0.0;
     for id in ids {
-        let a = tl.state_ordered(*id, None, step, t, plays, stamps);
+        let a = if old { tl.state_ordered_reference(*id, None, step, t, plays, stamps) } else { tl.state_ordered(*id, None, step, t, plays, stamps) };
         sum += a.opacity;
-        for p in tl.paragraph_targets(*id) {
+        let paras = if old { tl.paragraph_targets_reference(*id) } else { tl.paragraph_targets(*id) };
+        for p in paras {
             let a = tl.state(*id, Some(p), step, t);
             sum += a.opacity;
         }
@@ -73,22 +78,25 @@ fn run(name: &str, shapes: u32, per_shape: u32, frames: u32, stamps: bool) {
     let ids: Vec<ShapeId> = (0..shapes).map(|i| ShapeId(i + 1)).collect();
     let plays: Vec<TriggerPlay> = vec![TriggerPlay { trigger: ShapeId(900), step: 0, t: 0.3 }];
     let st: Vec<StepStamp> = if stamps { vec![StepStamp { trigger: ShapeId(900), step: 0, at: 1 }] } else { Vec::new() };
-    // Warm up (the first frames pay for the caches of the allocator).
-    for f in 0..8 {
-        frame(&tl, &ids, 0, f as f64 * 0.016, &plays, &st);
+    let mut times = [0.0f64; 2];
+    for (i, old) in [false, true].into_iter().enumerate() {
+        // Warm up (the first frames pay for the caches of the allocator).
+        for f in 0..8 {
+            frame(&tl, &ids, 0, f as f64 * 0.016, &plays, &st, old);
+        }
+        let t0 = Instant::now();
+        let mut sum = 0.0;
+        for f in 0..frames {
+            sum += frame(&tl, &ids, 0, f as f64 * 0.016, &plays, &st, old);
+        }
+        times[i] = t0.elapsed().as_secs_f64();
+        assert!(sum.is_finite());
     }
-    let t0 = Instant::now();
-    let mut sum = 0.0;
-    for f in 0..frames {
-        sum += frame(&tl, &ids, 0, f as f64 * 0.016, &plays, &st);
-    }
-    let d = t0.elapsed();
-    let per_frame = d.as_secs_f64() / f64::from(frames);
-    let ms = d.as_secs_f64() * 1e3;
-    println!(
-        "{name:<28} {shapes:>3} shapes x {per_shape} effects: {ms:>8.3} ms for {frames} frames = {per_frame:>7.3} ms/frame ({:>6.1} us/shape/frame) [sum {sum:.3}]",
-        d.as_secs_f64() * 1e6 / (f64::from(frames) * f64::from(shapes))
-    );
+    let per_frame = |s: f64| s * 1000.0 / f64::from(frames);
+    let now_ms = per_frame(times[0]);
+    let before_ms = per_frame(times[1]);
+    let factor = times[1] / times[0].max(1e-12);
+    println!("{name:<28} {shapes:>3} shapes x {per_shape} effects: {now_ms:>7.3} ms/frame now, {before_ms:>7.3} ms/frame before ({factor:.1}x)");
 }
 
 #[test]

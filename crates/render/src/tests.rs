@@ -2633,13 +2633,18 @@ fn bench_needs_filters_cost() {
         }
         let filter_ms = t.elapsed().as_secs_f64() * 1000.0 / 200.0;
         t = std::time::Instant::now();
+        for _ in 0..200 {
+            hits += usize::from(needs_filters_reference(&p, &p.slides[0]));
+        }
+        let old_ms = t.elapsed().as_secs_f64() * 1000.0 / 200.0;
+        t = std::time::Instant::now();
         for _ in 0..20 {
             let _ = render_slide(&p, 0, &opts);
         }
         let render_ms = t.elapsed().as_secs_f64() * 1000.0 / 20.0;
+        let pct = filter_ms * 100.0 / render_ms.max(1e-9);
         println!(
-            "needs_filters: {n} shapes (text: {text}): {filter_ms:.3} ms/call, render {render_ms:.3} ms ({:.1}%) [filters {hits}]",
-            filter_ms * 100.0 / render_ms.max(1e-9)
+            "needs_filters: {n} shapes (text: {text}): {filter_ms:.4} ms/call (was {old_ms:.4} ms), render {render_ms:.3} ms ({pct:.1}% of the render) [filters {hits}]"
         );
     }
 }
@@ -2681,4 +2686,55 @@ fn the_filter_check_follows_the_document() {
     let plain_again = deck_with(vec![text(false)]);
     assert!(!needs_filters(&plain_again, &plain_again.slides[0]), "the check follows the document");
     assert_eq!(render_slide(&plain_again, 0, &opts).pixels, before.pixels, "the plain slide is unchanged");
+}
+
+/// The filter check stopped copying the effects of every shape and stopped reading the master's
+/// text styles once per shape: it must still answer the same.
+#[test]
+fn the_filter_check_answers_as_the_copying_one_did() {
+    let glow = deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 255, 0)), radius: 8.0 };
+    let shadow = deckcraft_model::style::Shadow {
+        color: ColorRef::rgb(deckcraft_color::Rgba { r: 0, g: 0, b: 0, a: 128 }),
+        blur: 2.0,
+        dist: 12.0,
+        dir: 45.0,
+        inner: false,
+        sx: 1.0,
+        sy: 1.0,
+        kx: 0.0,
+        ky: 0.0,
+        align: String::new(),
+        rotate_with_shape: false,
+    };
+    let text_shape = |id: u32, fx: &dyn Fn(&mut deckcraft_model::text::RunProps)| {
+        let mut t = TextBody::from_text("TEXT");
+        fx(&mut t.paragraphs[0].runs[0].props);
+        Shape { id: ShapeId(id), xfrm: Some(Xfrm::new(50.0, 50.0, 300.0, 100.0)), text: Some(t), ..Default::default() }
+    };
+    let plain = Shape { id: ShapeId(1), xfrm: Some(Xfrm::new(50.0, 200.0, 300.0, 100.0)), ..Default::default() };
+    let soft = Shape {
+        id: ShapeId(2),
+        xfrm: Some(Xfrm::new(400.0, 200.0, 300.0, 100.0)),
+        effects: Some(deckcraft_model::Effects { soft_edge: Some(4.0), ..Default::default() }),
+        ..Default::default()
+    };
+    let styled = Shape {
+        id: ShapeId(3),
+        xfrm: Some(Xfrm::new(400.0, 50.0, 300.0, 100.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    };
+    let decks: Vec<Vec<Shape>> = vec![
+        vec![],
+        vec![plain.clone()],
+        vec![plain.clone(), soft.clone()],
+        vec![text_shape(4, &|_| {})],
+        vec![text_shape(4, &|p| p.glow = Some(glow.clone()))],
+        vec![text_shape(4, &|p| p.shadow = Some(shadow.clone()))],
+        vec![text_shape(4, &|p| p.glow = Some(glow.clone())), soft.clone(), styled.clone()],
+    ];
+    for shapes in decks {
+        let p = deck_with(shapes);
+        assert_eq!(needs_filters(&p, &p.slides[0]), needs_filters_reference(&p, &p.slides[0]), "the check changed its mind");
+    }
 }

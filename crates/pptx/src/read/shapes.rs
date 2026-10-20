@@ -407,21 +407,21 @@ fn keep_alternate(imp: &mut Imp, part: &Part, s: &mut Shape, e: &El) {
 
 /// The parts a kept element points to, so a save writes them back: (the relationship id the XML
 /// uses, the relationship type, the part as a media item). A part with relationships of its own
-/// cannot be carried: the save then falls back to the preview.
+/// cannot be carried: it is left out, and the save falls back to the preview.
 fn kept_parts_of(imp: &mut Imp, part: &Part, e: &El) -> Vec<(String, String, deckcraft_model::MediaId)> {
-    super::rel_refs(e)
-        .into_iter()
-        .map(|id| {
-            let rel = part.rels.get(&id).filter(|r| !r.external)?;
-            if !imp.pkg.rels(&rel.target).items.is_empty() {
-                return None;
-            }
-            let (kind, target) = (rel.ty.clone(), rel.target.clone());
-            let media = if rel.kind == "diagramData" { diagram_data(imp, &target) } else { imp.media_for(&target) };
-            Some((id, kind, media?))
-        })
-        .collect::<Option<Vec<_>>>()
-        .unwrap_or_default()
+    let mut out = vec![];
+    for id in super::rel_refs(e) {
+        let Some(rel) = part.rels.get(&id).filter(|r| !r.external) else { continue };
+        if !imp.pkg.rels(&rel.target).items.is_empty() {
+            continue;
+        }
+        let (kind, target) = (rel.ty.clone(), rel.target.clone());
+        let media = if rel.kind == "diagramData" { diagram_data(imp, &target) } else { imp.media_for(&target) };
+        if let Some(media) = media {
+            out.push((id, kind, media));
+        }
+    }
+    out
 }
 
 fn pic(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Shape {

@@ -557,6 +557,17 @@ impl Timeline {
         self.state(shape, para, s, t)
     }
 
+    /// The paragraphs of a shape as they were found before the index: a scan of the effects and
+    /// of the paragraph groups, every call.
+    #[cfg(test)]
+    pub(crate) fn paragraph_targets_reference(&self, shape: ShapeId) -> Vec<usize> {
+        let mut v: Vec<usize> = self.effects.iter().filter(|e| e.timing.shape == shape).filter_map(|e| e.timing.paragraph).collect();
+        v.extend(self.groups.iter().filter(|g| g.0 == shape && v.contains(&g.2)).map(|g| g.1).collect::<Vec<_>>());
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
     /// The state as it was computed before the timeline grew its index: the effects of the
     /// shape are collected by scanning the whole timeline and sorted, every call. The test
     /// below holds the two to the same answer.
@@ -571,7 +582,7 @@ impl Timeline {
         stamps: &[StepStamp],
     ) -> AnimState {
         let para = para.map(|p| self.groups.iter().find(|g| g.0 == shape && g.1 == p).map(|g| g.2).unwrap_or(p));
-        let base_color = self.colors.get(&shape).copied().unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
+        let base_color = self.colors.iter().find(|(s, _)| **s == shape).map(|(_, c)| *c).unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
         let mut idxs: Vec<u32> =
             self.effects.iter().enumerate().filter(|(_, e)| e.timing.shape == shape && e.timing.paragraph == para).map(|(i, _)| i as u32).collect();
         idxs.sort_by_key(|&i| self.effects[i as usize].timing.anim);

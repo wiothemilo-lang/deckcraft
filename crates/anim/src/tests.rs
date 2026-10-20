@@ -391,7 +391,7 @@ fn malformed_paths_dont_panic() {
         "M 0 0 Q",
         "--..ee",
         "M 0 0 H 1 V 1 h -1 v -1",
-        "ðŸ˜€ M 1 1",
+        "😀 M 1 1",
         "M 0 0 L 0.5 0.5 X 9 9",
     ] {
         let p = MotionPath::parse(s);
@@ -901,7 +901,7 @@ fn show_follows_links() {
 }
 
 /// #420: late in the Honeycomb every cell has settled, so the incoming hexagons must cover the
-/// whole slide â€” the old row count stopped at ~75% of a 16:9 slide and left the bottom black.
+/// whole slide — the old row count stopped at ~75% of a 16:9 slide and left the bottom black.
 #[test]
 fn honeycomb_cells_reach_the_bottom_before_the_slide_ends() {
     let sign = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
@@ -1036,7 +1036,7 @@ fn show_returns_to_the_zoom_slide() {
         stop_sound: false,
     };
     let mut s = ShowState::new(&p);
-    // A section zoom on slide 0 for slides 2â€“3.
+    // A section zoom on slide 0 for slides 2–3.
     assert_eq!(s.follow_link(&p, &link(2, Some(3)), None), LinkJump::Show(ShowAction::Slide(2)));
     assert_eq!(s.next(&p), ShowAction::Slide(3));
     assert_eq!(s.next(&p), ShowAction::Slide(0), "back to the zoom");
