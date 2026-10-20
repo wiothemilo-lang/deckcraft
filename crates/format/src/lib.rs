@@ -1,10 +1,14 @@
 //! The native `.deckcraft` format: a zip holding `presentation.json` (the model, minus media
 //! bytes), `media/<id>` files with the embedded media, and `mimetype`. Readers ignore unknown
-//! fields, so newer files open in older builds with what those builds understand.
+//! fields, so newer files open in older builds with what those builds understand. Files written
+//! before the SlideCraft → DeckCraft rename (`.slidecraft`) are read too.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
 mod finite;
+
+#[cfg(test)]
+mod legacy_tests;
 
 use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
@@ -13,8 +17,15 @@ use deckcraft_model::text::{Paragraph, TextBody};
 use deckcraft_model::{LayoutType, Presentation, ShapeKind, defaults};
 
 pub const MIMETYPE: &str = "application/vnd.storyteller.deckcraft+zip";
-/// Files written before the SlideCraft → DeckCraft rename (`.slidecraft`) are still read.
+/// The `mimetype` of files written before the SlideCraft → DeckCraft rename (`.slidecraft`):
+/// such a file is still read, and its manifest names its format
+/// ([`LEGACY_FORMAT_NAME`]).
 pub const LEGACY_MIMETYPE: &str = concat!("application/vnd.storyteller.", "slide", "craft+zip");
+/// The `format` name a manifest carries now.
+pub const FORMAT_NAME: &str = "deckcraft";
+/// The `format` name a manifest carried before the SlideCraft → DeckCraft rename: such a file
+/// is still ours, and is still read.
+pub const LEGACY_FORMAT_NAME: &str = "slidecraft";
 pub const EXTENSION: &str = "deckcraft";
 /// Format version written into the manifest.
 pub const VERSION: u32 = 1;
@@ -63,7 +74,7 @@ pub fn save(p: &Presentation) -> Result<Vec<u8>> {
         z.start_file("mimetype", stored).map_err(w)?;
         z.write_all(MIMETYPE.as_bytes()).map_err(|e| FormatError::Write(e.to_string()))?;
         let m = Manifest {
-            format: "deckcraft".into(),
+            format: FORMAT_NAME.into(),
             version: VERSION,
             generator: format!("DeckCraft {}", env!("CARGO_PKG_VERSION")),
             presentation: p.clone(),
@@ -94,7 +105,8 @@ fn is_compressed(ct: &str) -> bool {
         || ct.contains("zip")
 }
 
-/// Does this look like a `.deckcraft` file?
+/// Does this look like a `.deckcraft` file? A file written before the SlideCraft → DeckCraft
+/// rename counts too: it carries the same `mimetype` shape under the legacy name.
 pub fn sniff(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK") && [MIMETYPE, LEGACY_MIMETYPE].iter().any(|m| bytes.windows(m.len()).take(200).any(|w| w == m.as_bytes()))
 }
@@ -135,7 +147,10 @@ fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m = parse_manifest(&json)?;
-    if m.format != "deckcraft" {
+    // The manifest's `format` says whose file this is. The rename only changed that name (and
+    // the `mimetype`), not the file's contents, so a file written before it is still ours and
+    // still opens; any other name is a file of somebody else's.
+    if m.format != FORMAT_NAME && m.format != LEGACY_FORMAT_NAME {
         return Err(FormatError::NotOurs(m.format));
     }
     let mut p = m.presentation;
