@@ -354,14 +354,15 @@ thread_local! {
 /// Does anything on this slide (or its layout/master graphics) use blur-based effects?
 pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
     let Some(rctx) = Ctx::for_slide(pres, slide) else { return false };
+    // The master's text styles are the same for every shape: check them once, not per shape.
+    let master_text = master_text_effects(&rctx);
     let mut any = false;
     let mut check = |shapes: &[Shape]| {
         deckcraft_model::walk(shapes, &mut |s, _| {
             if any {
                 return;
             }
-            let (e, _) = resolve::effects(&rctx, s);
-            if e.is_some_and(|e| !e.is_empty()) || text_has_effects(&rctx, s) {
+            if shape_has_effects(&rctx, s) || text_has_effects(s, master_text) {
                 any = true;
             }
         });
@@ -374,9 +375,75 @@ pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
     any
 }
 
+/// Does the shape (or the placeholder it inherits from) carry any effect? The lookup of
+/// [`resolve::effects`], without its copy of the effects: the check only asks whether there are
+/// any, and the copy of every shape's effects would be thrown away right after.
+fn shape_has_effects(rctx: &Ctx, s: &Shape) -> bool {
+    let (lp, mp) = resolve::parents(rctx, s);
+    for s in [Some(s), lp, mp].into_iter().flatten() {
+        if let Some(e) = &s.effects {
+            return !e.is_empty();
+        }
+        if let Some(st) = &s.style {
+            let idx = st.effect_ref.0;
+            if idx == 0 {
+                return false;
+            }
+            return rctx.master.theme.format.effects.get((idx - 1) as usize).is_some_and(|e| !e.is_empty());
+        }
+    }
+    false
+}
+
 /// Does the shape's text have a shadow or glow (on a run, in its list style, or in the master's
 /// text styles it inherits)? Such text is blurred, which needs filters.
-fn text_has_effects(rctx: &Ctx, s: &Shape) -> bool {
+fn text_has_effects(s: &Shape, master: bool) -> bool {
+    use deckcraft_model::text::ListStyle;
+    let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| run_blurred(&lv.run));
+    let Some(t) = &s.text else { return false };
+    t.paragraphs.iter().any(|p| p.runs.iter().any(|r| run_blurred(&r.props)) || run_blurred(&p.end_props)) || styled(&t.list_style) || master
+}
+
+/// Do the master's text styles carry a shadow or a glow? Every shape with text inherits them.
+fn master_text_effects(rctx: &Ctx) -> bool {
+    use deckcraft_model::text::ListStyle;
+    let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| run_blurred(&lv.run));
+    styled(&rctx.master.title_style) || styled(&rctx.master.body_style) || styled(&rctx.master.other_style)
+}
+
+/// Does the run have a shadow or a glow? Both are blurred, which needs the filters.
+fn run_blurred(r: &deckcraft_model::text::RunProps) -> bool {
+    r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0)
+}
+
+/// The filter check as it was before it stopped copying the effects of every shape and stopped
+/// reading the master's text styles once per shape: the test holds the two to the same answer.
+#[cfg(test)]
+fn needs_filters_reference(pres: &Presentation, slide: &Slide) -> bool {
+    let Some(rctx) = Ctx::for_slide(pres, slide) else { return false };
+    let mut any = false;
+    let mut check = |shapes: &[Shape]| {
+        deckcraft_model::walk(shapes, &mut |s, _| {
+            if any {
+                return;
+            }
+            let (e, _) = resolve::effects(&rctx, s);
+            if e.is_some_and(|e| !e.is_empty()) || text_has_effects_reference(&rctx, s) {
+                any = true;
+            }
+        });
+    };
+    check(&slide.shapes);
+    if let Some(l) = rctx.layout {
+        check(&l.shapes);
+    }
+    check(&rctx.master.shapes);
+    any
+}
+
+/// The text check as it was before the master's text styles were read once per slide.
+#[cfg(test)]
+fn text_has_effects_reference(rctx: &Ctx, s: &Shape) -> bool {
     use deckcraft_model::text::{ListStyle, RunProps};
     let fx = |r: &RunProps| r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0);
     let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| fx(&lv.run));
@@ -404,7 +471,8 @@ pub fn render_slide_drawn(pres: &Presentation, index: usize, opts: &RenderOpts) 
         RENDERER.with(|r| {
             let mut r = r.borrow_mut();
             r.drawn = None;
-            let img = r.slide(pres, slide, index, opts);
+            // The filter check walks the slide: do it once, here, and hand the answer on.
+            let img = r.slide(pres, slide, index, opts, needs_filters(pres, slide));
             (img, r.drawn.take())
         })
     })) {
@@ -440,8 +508,18 @@ pub enum SlidePart {
 /// Render one part of slide `index` (transitions that move the contents over the backgrounds).
 /// A panic inside the renderer becomes a transparent image (logged), never a crash.
 pub fn render_slide_part(pres: &Presentation, index: usize, part: SlidePart, opts: &RenderOpts) -> Image {
+    render_slide_part_with(pres, index, part, opts, None)
+}
+
+/// [`render_slide_part`] with the filter check already made (`Some`): the two parts of a slide
+/// (its background and its content) share the answer, and the check walks the slide.
+pub(crate) fn render_slide_part_with(pres: &Presentation, index: usize, part: SlidePart, opts: &RenderOpts, filters: Option<bool>) -> Image {
     let Some(slide) = pres.slides.get(index) else { return Image::default() };
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| RENDERER.with(|r| r.borrow_mut().slide_part(pres, slide, index, part, opts)))) {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // The filter check walks the slide: do it once, here, and hand the answer to the renderer.
+        let filters = filters.unwrap_or_else(|| needs_filters(pres, slide));
+        RENDERER.with(|r| r.borrow_mut().slide_part(pres, slide, index, part, opts, filters))
+    })) {
         Ok(img) => img,
         Err(_) => {
             log::error!("rendering part of slide {index} panicked; showing nothing");
@@ -472,7 +550,11 @@ pub fn render_blend(
 ) -> Image {
     let (Some(a), Some(b)) = (pres.slides.get(old), pres.slides.get(new)) else { return Image::default() };
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        RENDERER.with(|r| r.borrow_mut().blend(pres, (a, old), (b, new), mix, shapes, text, paths, opts))
+        RENDERER.with(|r| {
+            // The filter check walks the slides: do it once, here, and hand the answer on.
+            let filters = needs_filters(pres, a) || needs_filters(pres, b);
+            r.borrow_mut().blend(pres, (a, old), (b, new), mix, shapes, text, paths, opts, filters)
+        })
     })) {
         Ok(img) => img,
         Err(_) => {
@@ -666,8 +748,8 @@ impl Renderer {
         }
     }
 
-    fn slide(&mut self, pres: &Presentation, slide: &Slide, index: usize, opts: &RenderOpts) -> Image {
-        let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, slide));
+    fn slide(&mut self, pres: &Presentation, slide: &Slide, index: usize, opts: &RenderOpts, filters: bool) -> Image {
+        let (mut ctx, w, h, view) = Self::canvas(pres, opts, filters);
         let f = Frame { pres, opts, fields: Self::fields(pres, index, opts) };
         if let Some(rctx) = Ctx::for_slide(pres, slide) {
             self.backdrop(&mut ctx, &f, &rctx, slide, view);
@@ -678,8 +760,8 @@ impl Renderer {
         self.finish(ctx, w, h)
     }
 
-    fn slide_part(&mut self, pres: &Presentation, slide: &Slide, index: usize, part: SlidePart, opts: &RenderOpts) -> Image {
-        let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, slide));
+    fn slide_part(&mut self, pres: &Presentation, slide: &Slide, index: usize, part: SlidePart, opts: &RenderOpts, filters: bool) -> Image {
+        let (mut ctx, w, h, view) = Self::canvas(pres, opts, filters);
         let f = Frame { pres, opts, fields: Self::fields(pres, index, opts) };
         if let Some(rctx) = Ctx::for_slide(pres, slide) {
             match part {
@@ -707,9 +789,10 @@ impl Renderer {
         text: &[TextMorph],
         paths: &[PathMorph],
         opts: &RenderOpts,
+        filters: bool,
     ) -> Image {
         let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { 1.0 };
-        let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, old.0) || needs_filters(pres, new.0));
+        let (mut ctx, w, h, view) = Self::canvas(pres, opts, filters);
         let (Some(co), Some(cn)) = (Ctx::for_slide(pres, old.0), Ctx::for_slide(pres, new.0)) else { return self.finish(ctx, w, h) };
         // Backdrop graphics never take shape states: their ids may clash with the frame's shapes.
         let bopts = RenderOpts { state: None, date_text: opts.date_text.clone(), ..*opts };
@@ -2386,7 +2469,7 @@ mod mt_tests {
         sh.effects = Some(deckcraft_model::Effects { soft_edge: Some(5.0), ..Default::default() });
         sl.shapes.push(sh);
         assert!(needs_filters(&s, &s.slides[0]));
-        let img = RENDERER.with(|r| r.borrow_mut().slide(&s, &s.slides[0], 0, &RenderOpts { scale: 0.5, threads: 4, ..Default::default() }));
+        let img = RENDERER.with(|r| r.borrow_mut().slide(&s, &s.slides[0], 0, &RenderOpts { scale: 0.5, threads: 4, ..Default::default() }, true));
         assert_eq!(img.width, 480);
         // The shape itself is drawn (not a blank fallback).
         assert_ne!(img.pixel(30, 30), [255, 255, 255, 255]);

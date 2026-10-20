@@ -2173,7 +2173,7 @@ fn tiny_chart_does_not_blank_the_slide() {
         });
     }
     let p = deck_with(shapes);
-    let img = RENDERER.with(|r| r.borrow_mut().slide(&p, &p.slides[0], 0, &RenderOpts { scale: 1.0, ..Default::default() }));
+    let img = RENDERER.with(|r| r.borrow_mut().slide(&p, &p.slides[0], 0, &RenderOpts { scale: 1.0, ..Default::default() }, false));
     let px = img.pixel(200, 150);
     assert_ne!(px, [255, 255, 255, 255], "the other shape must still draw");
     assert_eq!(crate::chart::clamp_soft(5.0, 10.5, 0.276), 0.276);
@@ -2594,4 +2594,147 @@ fn empty_bullet_is_gray_only_while_editing_and_never_in_exports() {
     assert!(!changed.is_empty(), "an empty bullet must be visible");
     assert!(changed.iter().any(|(px, _)| px[0] == 179 && px[1] == 179 && px[2] == 179));
     assert!(changed.iter().all(|(px, _)| px[0] >= 179 && px[0] == px[1] && px[1] == px[2]));
+}
+
+/// What the filter check costs against the render it guards: it walks every shape of the slide
+/// (and of its layout and master) to know whether the slide needs the blur filters, which forces
+/// the renderer to single-thread. Run with
+/// `cargo test -p deckcraft-render --release -- --nocapture bench_`.
+#[test]
+fn bench_needs_filters_cost() {
+    let deck = |n: u32, text: bool| {
+        let mut p = Presentation::default();
+        let s = std::sync::Arc::make_mut(&mut p.slides[0]);
+        s.shapes = (0..n)
+            .map(|i| {
+                let mut sh = Shape {
+                    id: ShapeId(2000 + i),
+                    xfrm: Some(Xfrm::new(20.0 + (i % 10) as f64 * 90.0, 20.0 + (i / 10) as f64 * 90.0, 80.0, 60.0)),
+                    style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+                    ..Default::default()
+                };
+                if text {
+                    let mut t = TextBody::from_text("DECKCRAFT");
+                    t.paragraphs[0].runs[0].props.size = Some(18.0);
+                    sh.text = Some(t);
+                }
+                sh
+            })
+            .collect();
+        p
+    };
+    for (n, text) in [(10u32, false), (100, false), (100, true)] {
+        let p = deck(n, text);
+        let opts = RenderOpts { scale: 1.0, ..Default::default() };
+        let mut t = std::time::Instant::now();
+        let mut hits = 0;
+        for _ in 0..200 {
+            hits += usize::from(needs_filters(&p, &p.slides[0]));
+        }
+        let filter_ms = t.elapsed().as_secs_f64() * 1000.0 / 200.0;
+        t = std::time::Instant::now();
+        for _ in 0..200 {
+            hits += usize::from(needs_filters_reference(&p, &p.slides[0]));
+        }
+        let old_ms = t.elapsed().as_secs_f64() * 1000.0 / 200.0;
+        t = std::time::Instant::now();
+        for _ in 0..20 {
+            let _ = render_slide(&p, 0, &opts);
+        }
+        let render_ms = t.elapsed().as_secs_f64() * 1000.0 / 20.0;
+        let pct = filter_ms * 100.0 / render_ms.max(1e-9);
+        println!(
+            "needs_filters: {n} shapes (text: {text}): {filter_ms:.4} ms/call (was {old_ms:.4} ms), render {render_ms:.3} ms ({pct:.1}% of the render) [filters {hits}]"
+        );
+    }
+}
+
+/// The filter check decides whether the renderer may work on several threads: a slide with a
+/// blur (a text glow, a shadow, a soft edge) has to be drawn single-threaded. The check walks
+/// the slide, so it must follow the document: a stale answer would draw a filtered slide on
+/// several threads, which is what used to crash inside the renderer.
+#[test]
+fn the_filter_check_follows_the_document() {
+    let text = |glow: bool| {
+        let mut t = TextBody::from_text("GLOW");
+        t.paragraphs[0].runs[0].props.size = Some(80.0);
+        if glow {
+            t.paragraphs[0].runs[0].props.glow =
+                Some(deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 255, 0)), radius: 10.0 });
+        }
+        Shape { id: ShapeId(950), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), text: Some(t), ..Default::default() }
+    };
+    let opts = RenderOpts { scale: 1.0, threads: 4, ..Default::default() };
+    let green = |img: &Image| img.pixels.as_chunks::<4>().0.iter().filter(|px| px[1] > 150 && px[0] < 120 && px[2] < 120).count();
+
+    // A plain slide needs no filter, and stays that way.
+    let plain = deck_with(vec![text(false)]);
+    assert!(!needs_filters(&plain, &plain.slides[0]), "a plain slide needs no filter");
+    let before = render_slide(&plain, 0, &opts);
+    assert_eq!(green(&before), 0, "no halo without a glow");
+
+    // With a glow the slide needs the filter: the renderer must draw it single-threaded, and the
+    // picture must not depend on the threads asked for.
+    let glowing = deck_with(vec![text(true)]);
+    assert!(needs_filters(&glowing, &glowing.slides[0]), "a text glow blurs");
+    let with_glow = render_slide(&glowing, 0, &opts);
+    assert!(green(&with_glow) > 100, "the halo is drawn");
+    let single = render_slide(&glowing, 0, &RenderOpts { scale: 1.0, threads: 0, ..Default::default() });
+    assert_eq!(with_glow.pixels, single.pixels, "a filtered slide is drawn the same on one thread");
+
+    // Taking the glow away again: the check follows the document, the picture is as it was.
+    let plain_again = deck_with(vec![text(false)]);
+    assert!(!needs_filters(&plain_again, &plain_again.slides[0]), "the check follows the document");
+    assert_eq!(render_slide(&plain_again, 0, &opts).pixels, before.pixels, "the plain slide is unchanged");
+}
+
+/// The filter check stopped copying the effects of every shape and stopped reading the master's
+/// text styles once per shape: it must still answer the same.
+#[test]
+fn the_filter_check_answers_as_the_copying_one_did() {
+    let glow = deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 255, 0)), radius: 8.0 };
+    let shadow = deckcraft_model::style::Shadow {
+        color: ColorRef::rgb(deckcraft_color::Rgba { r: 0, g: 0, b: 0, a: 128 }),
+        blur: 2.0,
+        dist: 12.0,
+        dir: 45.0,
+        inner: false,
+        sx: 1.0,
+        sy: 1.0,
+        kx: 0.0,
+        ky: 0.0,
+        align: String::new(),
+        rotate_with_shape: false,
+    };
+    let text_shape = |id: u32, fx: &dyn Fn(&mut deckcraft_model::text::RunProps)| {
+        let mut t = TextBody::from_text("TEXT");
+        fx(&mut t.paragraphs[0].runs[0].props);
+        Shape { id: ShapeId(id), xfrm: Some(Xfrm::new(50.0, 50.0, 300.0, 100.0)), text: Some(t), ..Default::default() }
+    };
+    let plain = Shape { id: ShapeId(1), xfrm: Some(Xfrm::new(50.0, 200.0, 300.0, 100.0)), ..Default::default() };
+    let soft = Shape {
+        id: ShapeId(2),
+        xfrm: Some(Xfrm::new(400.0, 200.0, 300.0, 100.0)),
+        effects: Some(deckcraft_model::Effects { soft_edge: Some(4.0), ..Default::default() }),
+        ..Default::default()
+    };
+    let styled = Shape {
+        id: ShapeId(3),
+        xfrm: Some(Xfrm::new(400.0, 50.0, 300.0, 100.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    };
+    let decks: Vec<Vec<Shape>> = vec![
+        vec![],
+        vec![plain.clone()],
+        vec![plain.clone(), soft.clone()],
+        vec![text_shape(4, &|_| {})],
+        vec![text_shape(4, &|p| p.glow = Some(glow.clone()))],
+        vec![text_shape(4, &|p| p.shadow = Some(shadow.clone()))],
+        vec![text_shape(4, &|p| p.glow = Some(glow.clone())), soft.clone(), styled.clone()],
+    ];
+    for shapes in decks {
+        let p = deck_with(shapes);
+        assert_eq!(needs_filters(&p, &p.slides[0]), needs_filters_reference(&p, &p.slides[0]), "the check changed its mind");
+    }
 }
