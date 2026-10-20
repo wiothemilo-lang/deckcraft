@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (failed commands restore state outside the presentation; legacy .slidecraft containers and file-dialog entries are retained; media playback options survive PPTX save/reopen, including video full screen; control-server tests distinguish rejection replies from pipelined TCP resets; rewind and EMF+ are no longer listed as round-trip losses; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (modern-comment PPTX parts declare their XML namespaces; namespace-aware package checks cover save/reopen/save; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -135,6 +135,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-20 | M2.974: modern-comment PPTX parts declare their text and relationship namespaces; namespace-aware checks cover all exported XML/relationship parts and save/reopen/save in PPTX, POTX and PPSX. Comments row and readiness scores unchanged |
 | 2026-10-20 | M2.74: control-server rejection tests read the reply before another write can race with socket closure; a separate authenticated pipeline check proves a trailing request never reaches the UI queue. Feature scores unchanged |
 | 2026-10-20 | M2.74: PPTX media playback settings survive save/reopen through standard audio/video timing nodes, including video full screen; options stay attached to the emitted shape ids, with bounded import and regression tests (#74) |
 | 2026-10-20 | trivial | Progress log: a failed command puts back what it changed outside the presentation, panic or not; a `.slidecraft` file keeps its own container and the file dialogs list it; the stale #70/#77 and EMF+ mentions are gone from the roadmap. Feature scores unchanged |
@@ -247,6 +248,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Modern-comment PPTX namespace failure fixed (#974), adapted from upstream #986; package namespace checks cover first and second saves. Readiness scores unchanged |
 | 2026-10-20 | trivial | Control-server CI tests distinguish a single-line rejection from a pipelined TCP reset; readiness scores unchanged |
 | 2026-10-20 | minor | Media playback option loss (#74) closed; full-screen video and independent clip targeting covered. Readiness percentages unchanged |
 | 2026-10-18 | minor | Localization ~8% → ~20%: the catalog, the language setting (#15) and a Vietnamese draft landed; Languages table, Upcoming item 3, the beta plan and the progress log updated |

@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options, including video full screen, survive PPTX save/reopen; the media option row stays D and weighted breadth is unchanged).
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (modern-comment PPTX namespace failure fixed; the comments row stays D and weighted breadth is unchanged).
 
 > **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -221,7 +221,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slide show | Set up show (loop, kiosk, without animation) | P1 | D |
 | Slide show | Record slide show (narration) | P2 | M |
 | Slide show | Multi-monitor presenting | P1 | M |
-| Review | Comments (add, reply, resolve, delete) | P1 | D |
+| Review | Comments (add, reply, resolve, delete; PPTX comment parts pass namespace checks, #974) | P1 | D |
 | Review | Accessibility checker | P2 | D |
 | Review | Compare presentations | P2 | P |
 | Review | Track changes / version history | P2 | M |
@@ -240,4 +240,5 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Comments row stays D after fixing malformed namespace output (#974); namespace-aware checks cover save/reopen/save, with breadth unchanged |
 | 2026-10-20 | minor | Media option row stays D with PPTX playback settings now preserved (#74), including video full screen; breadth unchanged |

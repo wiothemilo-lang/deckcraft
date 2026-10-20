@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; regression tests cover groups, duplicate ids, event starts and hostile values; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (modern-comment PPTX parts declare their XML namespaces; exported parts are checked with a namespace-aware reader before and after reopening; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -85,6 +85,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
   inner shadow, reflection and soft edge, a bevel preset with no kept `sp3d`, and text Mouse Over
   actions. Still open: a corpus of decks from outside this repo. Media playback options (#74)
   round-trip through standard timing nodes, including full-screen video (`media_options.rs`). The animation rewind flag (#77) round-trips since 2026-10-13.
+  Modern-comment parts declare the namespaces used by their text (#974); `comments.rs` checks
+  every XML and relationship part on export and after reopening and saving again, including
+  `.potx` and `.ppsx`. These structural checks do not replace PowerPoint reference renders.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -363,6 +366,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Fixed unbound namespaces in exported modern comments (#974); namespace-aware package checks supplement the owned corpus, which still needs PowerPoint reference renders |
 | 2026-10-20 | minor | Removed media playback option loss (#74): volume, autoplay, loop, rewind, slide span, hidden state and video full screen round-trip through standard timing nodes; groups, remapped ids and malformed values have regression coverage |
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips (the reader takes `cTn fill="remove"`, the writer emits it), so row 3 is the media playback options (#74) alone; the entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). New entry: the AV1 decoder is the least exercised of the four video codecs |
 | 2026-10-17 | trivial | Soak entry corrected: the long runs are `#[ignore]`d, so `cargo xtask ci` samples only the short seeded ones |
