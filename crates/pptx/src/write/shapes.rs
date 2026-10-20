@@ -10,7 +10,7 @@ use deckcraft_model::{Geom, PhType, Shape, ShapeId, ShapeKind, ShapeStyle, walk}
 use super::dml::{self, emu, emu_pos};
 use super::{Exp, Out};
 use crate::opc::NS_MC;
-use crate::xml::{A, W};
+use crate::xml::{A, Node, W};
 
 /// cNvPr ids for one part.
 pub struct IdMap {
@@ -848,23 +848,30 @@ fn opaque(
 ) {
     // Kept XML is written back as it was when every part it references was kept too, with those
     // parts re-added under this slide's relationship ids.
-    if let Ok(doc) = crate::xml::parse(xml.as_bytes())
-        && matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
-        && let Some(ids) = crate::read::rel_refs(&doc.root)
-            .iter()
-            .map(|r| {
-                let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
-                Some((r.clone(), x.media_rel(o, *m, kind)?))
-            })
-            .collect::<Option<std::collections::HashMap<_, _>>>()
-    {
-        let mut root = doc.root;
-        set_rel_ids(&mut root, &ids, 0);
-        ole_fallback(&mut root, x, o, preview);
-        let id = cx.id_for(s);
-        set_cnvpr_id(&mut root, id);
-        w.raw(&root.to_xml());
-        return;
+    if let Ok(doc) = crate::xml::parse(xml.as_bytes()) {
+        if doc.root.is("AlternateContent") {
+            // A kept `mc:AlternateContent`: both branches go back, so a choice we could not read
+            // is not lost.
+            if alternate_content(w, x, o, cx, s, doc.root, parts) {
+                return;
+            }
+        } else if matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
+            && let Some(ids) = crate::read::rel_refs(&doc.root)
+                .iter()
+                .map(|r| {
+                    let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
+                    Some((r.clone(), x.media_rel(o, *m, kind)?))
+                })
+                .collect::<Option<std::collections::HashMap<_, _>>>()
+        {
+            let mut root = doc.root;
+            set_rel_ids(&mut root, &ids, 0);
+            ole_fallback(&mut root, x, o, preview);
+            let id = cx.id_for(s);
+            set_cnvpr_id(&mut root, id);
+            w.raw(&root.to_xml());
+            return;
+        }
     }
     log::warn!("pptx: object '{label}' written as its preview picture");
     let id = cx.id_for(s);
@@ -887,6 +894,75 @@ fn opaque(
             sp(w, x, o, id, &p, false);
         }
     }
+}
+
+/// A kept `mc:AlternateContent`: its branches are written back as the file had them, with the
+/// relationship ids this slide now uses. A branch whose parts we could not keep is dropped: a
+/// relationship id that points nowhere would make PowerPoint ask to repair the file.
+fn alternate_content(
+    w: &mut W,
+    x: &mut Exp,
+    o: &mut Out,
+    cx: &mut Ctx,
+    s: &Shape,
+    mut root: crate::xml::El,
+    parts: &[(String, String, deckcraft_model::MediaId)],
+) -> bool {
+    // The relationship ids the block uses, and the ones this slide gives them.
+    let mut ids: HashMap<String, String> = HashMap::new();
+    for r in crate::read::rel_refs(&root) {
+        let Some((_, kind, m)) = parts.iter().find(|(id, ..)| id == &r) else { continue };
+        let Some(new) = x.media_rel(o, *m, kind) else { return false };
+        ids.insert(r, new);
+    }
+    let id = cx.id_for(s);
+    let mut kept = 0usize;
+    let mut out = Vec::with_capacity(root.children.len());
+    for c in std::mem::take(&mut root.children) {
+        match c {
+            Node::El(mut b) if b.is("Choice") || b.is("Fallback") => {
+                if !crate::read::rel_refs(&b).iter().all(|r| ids.contains_key(r)) {
+                    log::warn!("pptx: a branch of an alternate content block was dropped: its parts are missing");
+                    continue;
+                }
+                set_rel_ids(&mut b, &ids, 0);
+                if b.is("Fallback") {
+                    // The branch the shape shows: it takes the shape's own id.
+                    set_cnvpr_id(&mut b, id);
+                } else {
+                    // The branch we could not read: its shapes get ids of their own, so they
+                    // cannot clash with the ids of the deck's shapes.
+                    renumber_cnvprs(&mut b, cx.ids);
+                }
+                kept += 1;
+                out.push(Node::El(b));
+            }
+            other => out.push(other),
+        }
+    }
+    root.children = out;
+    if kept == 0 {
+        return false;
+    }
+    w.raw(&root.to_xml());
+    true
+}
+
+/// Give every `p:cNvPr` in `el` an id of its own.
+fn renumber_cnvprs(el: &mut crate::xml::El, ids: &mut IdMap) {
+    fn rec(el: &mut crate::xml::El, ids: &mut IdMap, depth: usize) {
+        if depth > 8 {
+            return;
+        }
+        for c in el.elements_mut() {
+            if c.is("cNvPr") {
+                c.set_attr("id", &ids.fresh().to_string());
+            } else {
+                rec(c, ids, depth + 1);
+            }
+        }
+    }
+    rec(el, ids, 0);
 }
 
 fn shape_with_id(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, id: u32) {
