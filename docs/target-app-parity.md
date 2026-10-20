@@ -1,6 +1,6 @@
 # DeckCraft vs Microsoft PowerPoint: parity assessment
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (the animation rewind flag (#77) round-trips and the EMF+ records are drawn, so the file formats, pictures, animations and file exchange rows no longer name them as losses; the media playback options (#74) stay; headline percentages unchanged; previous: minor, localization re-scored with the string catalog and the Vietnamese draft landed: ~8% → ~20%, 55–90 h → 40–73 h; headline percentages unchanged; previous: major, community PR wave 2026-10-14: breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) after `cargo xtask parity`; area table and What works today folded to one row or bullet each; 320 engine commands; ready ~55% and stage alpha unchanged; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; regression tests cover groups, duplicate ids, event starts and hostile values; aggregate readiness scores unchanged); previous: minor (the animation rewind flag (#77) round-trips and the EMF+ records are drawn, so the file formats, pictures, animations and file exchange rows no longer name them as losses; the media playback options (#74) stay; headline percentages unchanged; previous: minor, localization re-scored with the string catalog and the Vietnamese draft landed: ~8% → ~20%, 55–90 h → 40–73 h; headline percentages unchanged; previous: major, community PR wave 2026-10-14: breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) after `cargo xtask parity`; area table and What works today folded to one row or bullet each; 320 engine commands; ready ~55% and stage alpha unchanged; previous: minor, hours to ~95% per audience added)  · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -65,7 +65,7 @@ The weights are what those users actually depend on, written down so the total c
 | Dimension | Weight | Ready | Hours to full | Doc | Evidence |
 |---|---:|---:|---|---|---|
 | Features (breadth × depth) | 30% | ~62% | 140–240 | [parity-checklist.md](parity-checklist.md), [animation-parity.md](animation-parity.md), [slideshow-parity.md](slideshow-parity.md) | Breadth 84% measured. Depth lags: partial rows remain, and users found depth bugs in rows scored done within two days (#53, #60, #69, #70, #74, #77, #78) |
-| File formats | 20% | ~58% | 60–110 | [file-format-parity.md](file-format-parity.md) | PPTX reads and writes every main part and keeps unknown objects; files open in PowerPoint without repair. But it has never met a corpus of real decks, SVG pictures don't decode, the media playback options are lost on round trip, and there is no `.ppt`, `.pptm`, `.odp`, video or GIF export |
+| File formats | 20% | ~58% | 60-110 | [file-format-parity.md](file-format-parity.md) | PPTX reads and writes every main part and keeps unknown objects; comments, media playback options and rewind round-trip. It has never met a corpus of real decks, SVG pictures don't decode, and there is no `.ppt`, `.pptm`, `.odp`, video or GIF export |
 | UI/UX fidelity | 15% | ~60% | 30–50 | [ui-parity.md](ui-parity.md) | All 10 ribbon tabs and the contextual tabs exist; Format Shape pane, Animation Pane, dialogs and menus are thinner than PowerPoint's; no native macOS menu bar; user reports #17, #71, #73, #76 |
 | Stability | 10% | ~60% | 10–20 | [gaps.md](gaps.md) | Never-crash rules, a panic guard round every command, PPTX fuzz/malformed tests. But startup crashes on some Windows GPUs (#40, #59) and Close discards edits without asking (#60) |
 | Performance | 5% | ~55% | 10–20 | [hardware-parity.md](hardware-parity.md) | Unmeasured against PowerPoint. Slides rasterize on the CPU (`vello_cpu`); Morph re-aligns outlines every frame (#67) |
@@ -118,7 +118,7 @@ PowerPoint is taken out of the areas and charged once, as a discount.
 |---|---:|---|
 | Interaction fidelity | ×0.92 | No native macOS menu bar, thinner Format Shape pane, Tab ends text entry (#78), font faces (#69), window chrome (#71) |
 | Stability on real machines | ×0.92 | Startup crashes on some Windows GPUs (#40, #59); Close discards edits (#60, fix in PR #75); video stalls in the editor on Ubuntu (#91); arrows reported dead in the show on Linux Mint (#17) |
-| File exchange with PowerPoint users | ×0.88 | Harsher than VectorCraft's ×0.92 because swapping `.pptx` is daily work for this user: never tested on real decks, SVG pictures don't decode, icons from PowerPoint don't come through (#56), the media playback options are lost on save (#74) |
+| File exchange with PowerPoint users | x0.88 | Harsher than VectorCraft's x0.92 because swapping `.pptx` is daily work for this user: never tested on real decks, SVG pictures don't decode, icons from PowerPoint don't come through (#56); comment threads, media options and rewind are preserved |
 
 71.3 × 0.92 × 0.92 × 0.88 = **53.1 → ~53%**. This is about the same as the full number, unlike
 apps where mainstream comes out well above it. The dimensions mainstream leaves out
@@ -192,9 +192,9 @@ Features row of the dimension table keeps ~62% until the next full re-measure). 
 | Charts | 7 | 65% | ~45% | 12–20 | Data grid editing, chart elements, the `chartex` types (waterfall, funnel, treemap, sunburst, histogram, box) | [parity-checklist.md](parity-checklist.md) |
 | SmartArt | 4 | 50% | ~35% | 8–14 | PowerPoint diagrams editable (read their data model), the data model on save, more layouts | [parity-checklist.md](parity-checklist.md) |
 | Pictures | 7 | 60% | ~45% | 12–20 | SVG, clipboard paste on Windows/Linux (#53), remove background, artistic-effect and correction depth | [file-format-parity.md](file-format-parity.md) |
-| Media | 4 | 67% | ~60% | 8–14 | WMA/WMV decode, record audio/screen, 3-D models and stock content, playback options lost on PPTX round trip (#74) | [file-format-parity.md](file-format-parity.md) |
+| Media | 4 | 67% | ~60% | 8-14 | WMA/WMV decode, record audio/screen, 3-D models and stock content; playback options now survive PPTX save/reopen (#74) | [file-format-parity.md](file-format-parity.md) |
 | Transitions | 4 | 100% | ~80% | 4–8 | 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
-| Animations | 6 | 85% | ~65% | 10–16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview from the selected effect | [animation-parity.md](animation-parity.md) |
+| Animations | 6 | 85% | ~65% | 10-16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview from the selected effect; rewind survives save (#77) | [animation-parity.md](animation-parity.md) |
 | Slide show and presenter view | 8 | 68% | ~60% | 10–16 | Second-display placement, laser from presenter view, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
 | Review | 3 | 70% | ~45% | 8–14 | Compare depth, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
 | Draw (ink) | 2 | 50% | ~30% | 5–9 | Pen tilt, ink to math, lasso, ink to shape/text depth | [hardware-parity.md](hardware-parity.md) |
@@ -291,6 +291,7 @@ scored done (16 open issues).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips and the EMF+ records inside a dual EMF/WMF are drawn (an EMF+ only file plays them all), so the file formats, pictures, animations and file exchange rows stop naming them as losses; the media playback options (#74) stay. Headline percentages unchanged pending the next re-measure |
+| 2026-10-20 | minor | Media playback option loss (#74) closed with standard timing nodes, full-screen video and regression coverage. Historical issue counts and aggregate readiness scores unchanged |
 | 2026-10-18 | minor | Localization row re-scored: the catalog, the language setting (#15) and a ~60% Vietnamese draft landed, so ready ~8% → ~20% and hours 55–90 → 40–73 plus native review. Headline percentages unchanged pending the next re-measure |
 | 2026-10-16 | trivial | Arrange shortfall: Align to Slide and Align Selected Objects are in the Align menu. Percentages unchanged |
 | 2026-10-14 | minor | Community PR wave folded: one headline breadth row (84% over 191 features after `cargo xtask parity`; duplicate checklist rows removed), one row per feature area with the latest breadth and shortfalls, one Themes / Slide show / Views / Review / Automation bullet each (320 engine commands). SmartArt ready ~35% (Text Pane, 6e40335) moves the area mean to 62.8%; dimension and headline percentages unchanged |

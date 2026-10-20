@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (the animation rewind flag (#77) round-trips, so row 3 is the media playback options (#74) alone, and the entry names what is kept (trim, fades, bookmarks) and what is lost; an entry for the AV1 decoder, the least exercised of the four video codecs; previous: minor, localization: the catalog, the language setting (#15) and a Vietnamese draft landed; row 5 and its hours narrowed; 2026-10-17: the soak entry no longer claims CI samples long sessions — those runs are `#[ignore]`d; previous: major, community PR wave 2026-10-14: soak tests, PPTX corpus, comment threads (#70), embedded fonts, SmartArt Text Pane, Animation Pane timeline, Hunspell spelling, thesaurus, AutoCorrect, 14 new dialogs, pen pressure and trackpad gestures; duplicated entries and headers folded; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; regression tests cover groups, duplicate ids, event starts and hostile values; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -13,25 +13,24 @@ tests (calibration in [target-app-parity.md](target-app-parity.md#calibration-ho
 When a gap closes, delete its entry, update the parity doc it points to, and add a line to the
 revision history.
 
-## Ranked: the top 15
+## Ranked: the top 14
 
 | # | Gap | Category | Beta | Hours | Doc |
 |---|---|---|:-:|---|---|
 | 1 | PPTX corpus is only decks we author (no PowerPoint reference renders) | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
 | 2 | Data loss and crashes on common paths (#60, #40, #59) | Stability | B | 6–12 | this file |
-| 3 | PPTX round trip drops media playback options (#74) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
-| 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
-| 5 | Localization: a Vietnamese draft plus 5 beta languages and native review | Localization | B (5 languages) | 40–73 | [localization-parity.md](localization-parity.md) |
-| 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
-| 7 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
-| 8 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
-| 9 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
-| 10 | Animation Pane: preview plays the whole slide, not from the selected effect (timeline done); 64 of ~190 effects | Feature | B (pane) | 8–14 | [animation-parity.md](animation-parity.md) |
-| 11 | Charts: data grid editing, elements, `chartex` types | Feature | B (data, elements) | 12–20 | [parity-checklist.md](parity-checklist.md) |
-| 12 | Format Shape pane thinner than PowerPoint's | UI/UX | B | 6–10 | [ui-parity.md](ui-parity.md) |
-| 13 | No native macOS menu bar | UI/UX | B | 3–5 | [ui-parity.md](ui-parity.md) |
-| 14 | PDF export rasterizes slide artwork | File format | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
-| 15 | Slides rasterize on the CPU; no performance baseline | Performance / hardware | | 15–30 | [hardware-parity.md](hardware-parity.md) |
+| 3 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
+| 4 | Localization: a Vietnamese draft plus 5 beta languages and native review | Localization | B (5 languages) | 40–73 | [localization-parity.md](localization-parity.md) |
+| 5 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
+| 6 | Fonts: only Regular, Bold and Italic faces (#69) | Feature | B | 3–5 | [ui-parity.md](ui-parity.md) |
+| 7 | Image paste fails on Windows and Linux (#53) | Feature | B | 2–4 | [ui-parity.md](ui-parity.md) |
+| 8 | Presenter view isn't placed on the second display | Hardware | B | 3–5 | [slideshow-parity.md](slideshow-parity.md) |
+| 9 | Animation Pane: preview plays the whole slide, not from the selected effect (timeline done); 64 of ~190 effects | Feature | B (pane) | 8–14 | [animation-parity.md](animation-parity.md) |
+| 10 | Charts: data grid editing, elements, `chartex` types | Feature | B (data, elements) | 12–20 | [parity-checklist.md](parity-checklist.md) |
+| 11 | Format Shape pane thinner than PowerPoint's | UI/UX | B | 6–10 | [ui-parity.md](ui-parity.md) |
+| 12 | No native macOS menu bar | UI/UX | B | 3–5 | [ui-parity.md](ui-parity.md) |
+| 13 | PDF export rasterizes slide artwork | File format | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
+| 14 | Slides rasterize on the CPU; no performance baseline | Performance / hardware | | 15–30 | [hardware-parity.md](hardware-parity.md) |
 
 ## Stability
 
@@ -84,24 +83,13 @@ Detail in [file-format-parity.md](file-format-parity.md).
   repeat, bounce end and triggers). Losses these checks found are fixed: notes- and handout-master
   text, paragraph default run properties (`defRPr`, including a link), action sounds, a run's
   inner shadow, reflection and soft edge, a bevel preset with no kept `sp3d`, and text Mouse Over
-  actions. Still open: media playback options (#74) and a corpus of decks from
-  outside this repo. The animation rewind flag (#77) round-trips since 2026-10-13.
+  actions. Still open: a corpus of decks from outside this repo. Media playback options (#74)
+  round-trip through standard timing nodes, including full-screen video (`media_options.rs`). The animation rewind flag (#77) round-trips since 2026-10-13.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
   `standards/test-corpora.md`), add render checks, have the owner open outputs in PowerPoint, fix
   what breaks. **Beta blocker.**
-
-### Round trip loses media playback options (#74)
-- **Evidence:** issue filed 2026-10-10 by an automated reviewer. A media shape's trim, its fades
-  and its bookmarks round-trip (`p14:trim`, `p14:fade`, `p14:bmkLst` are written and read back,
-  `crates/pptx/tests/corpus_media.rs` checks them), but the playback **flags** are not: the reader
-  sets the volume to 1 and takes no autoplay, loop, rewind, play-across-slides, hide-while-not-
-  playing or full-screen flag, and the writer emits none of them. The animation rewind flag
-  (#77) round-trips: the reader takes `cTn fill="remove"` and the writer emits it
-  (`crates/pptx/src/read/timing.rs`, `crates/pptx/src/write/timing.rs`).
-- **Impact:** a deck opened and saved silently loses show behaviour.
-- **Estimate:** 2–4 h. **Beta blocker.**
 
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,
@@ -375,6 +363,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Removed media playback option loss (#74): volume, autoplay, loop, rewind, slide span, hidden state and video full screen round-trip through standard timing nodes; groups, remapped ids and malformed values have regression coverage |
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips (the reader takes `cTn fill="remove"`, the writer emits it), so row 3 is the media playback options (#74) alone; the entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). New entry: the AV1 decoder is the least exercised of the four video codecs |
 | 2026-10-17 | trivial | Soak entry corrected: the long runs are `#[ignore]`d, so `cargo xtask ci` samples only the short seeded ones |
 | 2026-10-16 | trivial | AutoFormat superscripts ordinals (1st, 22nd) as you type, with an AutoCorrect option to turn it off; automatic bulleted lists remain |

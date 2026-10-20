@@ -1,5 +1,7 @@
 # PowerPoint feature checklist
 
+> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options, including video full screen, survive PPTX save/reopen; the media option row stays D and weighted breadth is unchanged).
+
 > **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
@@ -192,7 +194,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Media | Insert audio (any common format) | P0 | D |
 | Media | Insert video | P1 | D |
 | Media | Audio/video playback in the show (WMA/WMV not decodable yet) | P0 | P |
-| Media | Trim, fade in/out, volume, loop, play across slides | P2 | D |
+| Media | Trim, fade in/out, volume, loop, play across slides (PPTX playback options and video full screen round-trip; `media_options.rs`) | P2 | D |
 | Media | Record audio / screen recording | P2 | M |
 | Media | Icons, 3-D models, stock content | P2 | M |
 | Media | Embedded objects (OLE): insert; foreign objects kept on round trip | P2 | P |
@@ -233,3 +235,9 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Platforms (✱) | macOS, Windows, Linux builds | P0 | P |
 | Platforms (✱) | Web (WASM) build | P1 | D |
 | Platforms (✱) | BSD build | P2 | P |
+
+## Revision history
+
+| Date | Change | Summary |
+|---|---|---|
+| 2026-10-20 | minor | Media option row stays D with PPTX playback settings now preserved (#74), including video full screen; breadth unchanged |

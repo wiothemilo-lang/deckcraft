@@ -320,7 +320,11 @@ mod tests {
     }
 
     fn hello(w: &mut impl Write, token: &str) {
-        writeln!(w, r#"{{"id":0,"method":"{HELLO}","params":{{"token":"{token}"}}}}"#).unwrap();
+        try_hello(w, token).unwrap();
+    }
+
+    fn try_hello(w: &mut impl Write, token: &str) -> std::io::Result<()> {
+        writeln!(w, r#"{{"id":0,"method":"{HELLO}","params":{{"token":"{token}"}}}}"#)
     }
 
     fn reply(r: &mut BufReader<TcpStream>) -> Option<Value> {
@@ -424,19 +428,41 @@ mod tests {
 
     #[test]
     fn a_line_that_is_not_a_request_closes_the_connection() {
-        let (addr, rx) = server(small());
-        ui(rx);
-        for junk in [&b"hello\n"[..], b"[1,2]\n", b"{\"id\":1}\n", b"{\"method\":5}\n", b"\xff\xfe\n", b"GET /x HTTP/1.1\n"] {
+        let cases = [&b"hello\n"[..], b"[1,2]\n", b"{\"id\":1}\n", b"{\"method\":5}\n", b"\xff\xfe\n", b"GET /x HTTP/1.1\n"];
+        // A closed socket can reach the client before its server thread releases the slot.
+        // Leave room for every case so this test cannot accidentally exercise the busy path.
+        let (addr, rx) = server(Limits { max_clients: cases.len(), ..small() });
+        for junk in cases {
             let (mut r, mut w) = client(addr);
             w.write_all(junk).unwrap();
-            w.write_all(b"{\"id\":2,\"method\":\"m\"}\n").unwrap();
+            // Read the rejection without sending more data after the server may have closed:
+            // that late write can cause a TCP reset and discard the reply on Linux.
             let replies = replies_until_closed(&mut r);
             assert_eq!(replies.len(), 1, "{replies:?}");
             assert_eq!(replies[0]["ok"], false);
+            assert!(replies[0]["error"].as_str().unwrap().contains("closing the connection"), "{replies:?}");
+            assert!(rx.try_recv().is_err(), "invalid input reached the UI queue");
         }
         assert!(is_http_request_line("OPTIONS * HTTP/1.1"));
         assert!(is_http_request_line("PRI * HTTP/2.0"));
         assert!(!is_http_request_line("{\"method\":\"GET /\"}"));
+    }
+
+    #[test]
+    fn a_request_after_invalid_input_is_never_dispatched() {
+        let (addr, rx) = server(small());
+        let (mut r, mut w) = authed(addr);
+        // Pipeline a valid, authenticated request behind the invalid line. TCP may reset a
+        // connection closed with unread input, so the error reply is best effort in this case
+        // (RFC 9293 section 3.6.1). The trailing request must never reach the app either way.
+        w.write_all(b"not JSON\n{\"id\":2,\"method\":\"engine.execute\",\"params\":{\"command\":\"slide.new\"}}\n").unwrap();
+        let replies = replies_until_closed(&mut r);
+        assert!(replies.len() <= 1, "{replies:?}");
+        for reply in replies {
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("closing the connection"), "{reply}");
+        }
+        assert!(rx.try_recv().is_err(), "the trailing request reached the UI queue");
     }
 
     #[test]
@@ -480,8 +506,9 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(4);
         loop {
             let (mut dr, mut dw) = client(addr);
-            hello(&mut dw, TOKEN);
-            if reply(&mut dr).is_some_and(|v| v["ok"] == true) {
+            // A still-busy listener can close before the handshake is written. That reset is
+            // another refused attempt, not a failure of the slot-release assertion below.
+            if try_hello(&mut dw, TOKEN).is_ok() && reply(&mut dr).is_some_and(|v| v["ok"] == true) {
                 writeln!(dw, r#"{{"id":2,"method":"m"}}"#).unwrap();
                 if reply(&mut dr).is_some_and(|v| v["ok"] == true) {
                     break;
