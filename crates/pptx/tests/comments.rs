@@ -133,6 +133,7 @@ fn comments_on_several_slides_round_trip() {
     let s = Arc::make_mut(&mut p.slides[2]);
     s.comments = vec![Comment { author: "Cara".into(), text: "Slide three".into(), date: "2025-03-06T00:00:00Z".into(), ..Default::default() }];
     let bytes = deckcraft_pptx::export(&p).expect("export");
+    assert_xml_namespaces(&bytes, 2);
     assert!(part(&bytes, "ppt/comments/modernComment1.xml").contains("Top thread"));
     // The parts are numbered by comment slide: the comment-free middle slide is skipped.
     assert!(part(&bytes, "ppt/comments/comment2.xml").contains("Slide three"));
@@ -205,4 +206,58 @@ fn modern_only_package_imports() {
     assert_eq!(b[0].replies.len(), 2);
     assert!(b[0].resolved);
     assert_eq!((b[0].x, b[0].y), (90.0, 45.0), "modern positions are EMU");
+}
+
+/// Every prefix an exported part uses is bound: PowerPoint refuses a package whose part is not
+/// namespace-well-formed (issue #974, the modern comments part used `a:` without declaring it).
+fn assert_xml_namespaces(bytes: &[u8], expected_modern: usize) {
+    use quick_xml::events::Event;
+    use quick_xml::name::ResolveResult;
+
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+    let mut modern = 0;
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).expect("entry");
+        let name = f.name().to_string();
+        if !(name.ends_with(".xml") || name.ends_with(".rels")) {
+            continue;
+        }
+        let mut data = vec![];
+        f.read_to_end(&mut data).expect("read");
+        modern += usize::from(name.starts_with("ppt/comments/modernComment") && name.ends_with(".xml"));
+        let mut r = quick_xml::NsReader::from_reader(data.as_slice());
+        loop {
+            match r.read_resolved_event() {
+                Ok((ns, Event::Start(e) | Event::Empty(e))) => {
+                    assert!(!matches!(ns, ResolveResult::Unknown(_)), "{name}: unbound prefix on <{}>", String::from_utf8_lossy(e.name().as_ref()));
+                    for attr in e.attributes() {
+                        let attr = attr.unwrap_or_else(|err| panic!("{name}: bad attribute: {err}"));
+                        let (ns, _) = r.resolver().resolve_attribute(attr.key);
+                        assert!(
+                            !matches!(ns, ResolveResult::Unknown(_)),
+                            "{name}: unbound prefix on attribute {}",
+                            String::from_utf8_lossy(attr.key.as_ref())
+                        );
+                    }
+                }
+                Ok((_, Event::Eof)) => break,
+                Ok(_) => {}
+                Err(e) => panic!("{name}: not well-formed: {e}"),
+            }
+        }
+    }
+    assert_eq!(modern, expected_modern, "the deck should write a modern comments part for each comment slide");
+}
+
+#[test]
+fn every_written_xml_part_binds_its_prefixes() {
+    for ext in ["pptx", "potx", "ppsx"] {
+        let bytes = deckcraft_pptx::export_as(&deck(), ext).expect("export");
+        assert_xml_namespaces(&bytes, 1);
+        let reopened = deckcraft_pptx::import(&bytes).expect("import");
+        let saved_again = deckcraft_pptx::export_as(&reopened, ext).expect("export again");
+        assert_xml_namespaces(&saved_again, 1);
+        let again = deckcraft_pptx::import(&saved_again).expect("import again");
+        assert_eq!(again.slides[0].comments, reopened.slides[0].comments, "{ext}: threads changed after the second save");
+    }
 }
