@@ -242,7 +242,9 @@ impl DocState {
             saved_doc: doc.clone(),
             doc,
             selection: Selection::default(),
-            history: History { limit: 500, ..Default::default() },
+            // The preferences say how many undo steps a presentation keeps; the session gives
+            // the open ones their depth when the preferences change.
+            history: History { limit: Prefs::default().undo_limit, ..Default::default() },
             path,
             revision: 1,
             interaction: None,
@@ -452,6 +454,19 @@ pub struct Clipboard {
     pub pastes: u32,
 }
 
+/// What a command changes outside the presentation: the requests it sends to the UI, the
+/// clipboard it fills, the painters it arms, the tool it leaves in a state. A command that
+/// fails puts them back, so a failed command leaves nothing behind but its error.
+#[derive(Clone)]
+struct Outside {
+    ui_requests: Vec<UiRequest>,
+    clipboard: Clipboard,
+    painter: Option<(cmd::format::Painted, bool)>,
+    anim_painter: Option<(Vec<deckcraft_model::anim::Animation>, bool)>,
+    default_look: Option<cmd::format::Painted>,
+    tool: tools::ToolState,
+}
+
 pub struct Session {
     docs: Vec<DocState>,
     active: Option<usize>,
@@ -564,10 +579,29 @@ impl Session {
             self.active = Some(i);
         }
     }
-    pub fn add_document(&mut self, d: DocState) -> usize {
+    pub fn add_document(&mut self, mut d: DocState) -> usize {
+        // A presentation opened now keeps as many undo steps as the preferences ask for.
+        d.history.limit = self.undo_limit();
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
         self.docs.len() - 1
+    }
+    /// Give the open presentations the undo depth the preferences ask for. The preferences are
+    /// a public field the host writes when the user changes them, so the engine cannot be told
+    /// when they change: it applies them whenever a command runs.
+    pub fn apply_prefs(&mut self) {
+        let limit = self.undo_limit();
+        for d in &mut self.docs {
+            if d.history.limit != limit {
+                d.history.limit = limit;
+                trim_history(&mut d.history);
+            }
+        }
+    }
+    /// How many undo steps a presentation may keep, as the preferences say (never more than
+    /// [`MAX_UNDO_LIMIT`], whatever a hand-edited `prefs.json` asks for).
+    fn undo_limit(&self) -> usize {
+        self.prefs.undo_limit.min(MAX_UNDO_LIMIT)
     }
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
@@ -586,6 +620,11 @@ impl Session {
     /// Run command `id`. A panic inside it becomes [`EngineError::Internal`] and leaves the
     /// presentation as it was.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        if self.depth == 0 {
+            // The outermost command is where the preferences (which the host may have changed
+            // since the last one) reach the open presentations.
+            self.apply_prefs();
+        }
         self.guarded(id, |s| s.execute_unguarded(id, params))
     }
 
@@ -603,6 +642,10 @@ impl Session {
         }
         let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone()));
         let outer = self.depth == 0;
+        // What the command may change outside the presentation: the UI requests it sends, the
+        // clipboard it fills, the painters it arms. A command that fails must leave them as
+        // they were, or the UI opens a dialog for an edit that never happened.
+        let outside = if outer { Some(self.outside()) } else { None };
         self.depth += 1;
         let r = (spec.run)(self, params);
         self.depth -= 1;
@@ -611,14 +654,23 @@ impl Session {
             Err(e) => {
                 // A command made of several edits can fail after some of them went through; the
                 // outermost one puts the presentation back, so a failed command changes nothing.
-                if outer
-                    && let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
-                    && st.uid == uid
-                    && !Arc::ptr_eq(&old, &st.doc)
-                {
-                    st.doc = old;
-                    st.selection = sel;
-                    st.revision += 1;
+                if outer {
+                    if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
+                        && st.uid == uid
+                    {
+                        let doc_changed = !Arc::ptr_eq(&old, &st.doc);
+                        let sel_changed = st.selection != sel;
+                        if doc_changed {
+                            st.doc = old;
+                        }
+                        st.selection = sel;
+                        if doc_changed || sel_changed {
+                            st.revision += 1;
+                        }
+                    }
+                    if let Some(saved) = outside {
+                        self.restore_outside(saved);
+                    }
                 }
                 return Err(e);
             }
@@ -646,6 +698,28 @@ impl Session {
 
     pub fn commands(&self) -> Vec<CommandInfo> {
         command_specs().iter().map(|c| c.info(self)).collect()
+    }
+
+    /// What the commands may change outside the presentation, as it is now.
+    fn outside(&self) -> Outside {
+        Outside {
+            ui_requests: self.ui_requests.clone(),
+            clipboard: self.clipboard.clone(),
+            painter: self.painter.clone(),
+            anim_painter: self.anim_painter.clone(),
+            default_look: self.default_look.clone(),
+            tool: self.tool.clone(),
+        }
+    }
+
+    /// Put back what a failed command changed outside the presentation.
+    fn restore_outside(&mut self, saved: Outside) {
+        self.ui_requests = saved.ui_requests;
+        self.clipboard = saved.clipboard;
+        self.painter = saved.painter;
+        self.anim_painter = saved.anim_painter;
+        self.default_look = saved.default_look;
+        self.tool = saved.tool;
     }
 
     /// Mutate the active presentation (copy-on-write) and bump the revision.
@@ -753,6 +827,20 @@ pub fn undo_cost(doc: &Presentation, newer: &Presentation) -> usize {
         n += m.data.len();
     }
     n
+}
+
+/// Drop the oldest undo steps until the stack keeps no more than its limit: the preferences
+/// say how many steps a presentation keeps, and lowering that depth throws the older ones away.
+fn trim_history(h: &mut History) {
+    let limit = h.limit.max(1);
+    if h.undo.len() <= limit {
+        return;
+    }
+    let extra = h.undo.len() - limit;
+    h.undo.drain(..extra);
+    // The steps that are gone have no memory left to keep track of.
+    let live: std::collections::HashSet<usize> = h.undo.iter().chain(h.redo.iter()).map(|e| Arc::as_ptr(&e.doc) as usize).collect();
+    h.costs.retain(|k, _| live.contains(k));
 }
 
 pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {

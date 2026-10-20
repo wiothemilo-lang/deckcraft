@@ -17,6 +17,8 @@ fn skipped(id: &str) -> bool {
         || id.starts_with("window.")
         || id.starts_with("show.")
         || id.starts_with("media.")
+        // The `test.` commands exist only in the test build, and they fail on purpose.
+        || id.starts_with("test.")
 }
 
 /// xorshift64*: tiny, deterministic, no dependency.

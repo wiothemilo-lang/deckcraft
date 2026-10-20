@@ -72,7 +72,15 @@ pub struct CommandInfo {
 impl CommandSpec {
     /// Holds because `Session::execute` skips the selection check when `id` or `ids` is given.
     pub fn acts_on(&self) -> Option<String> {
-        let keys = param_keys(self.params).unwrap_or_default();
+        // A params doc that does not parse is a bug in the command, not in the caller's
+        // selection: say so instead of quietly pretending the command takes no ids.
+        let keys = match param_keys(self.params) {
+            Ok(keys) => keys,
+            Err(e) => {
+                log::warn!("command `{}` has an unreadable params doc: {e}", self.id);
+                return None;
+            }
+        };
         let named = if keys.contains(&"ids") {
             Some("the shapes in `ids`")
         } else if keys.contains(&"id") {
@@ -90,6 +98,13 @@ impl CommandSpec {
             (NO_TEXT_POINT, _) => "Acts on the text being edited; text.edit starts editing a shape's text.".into(),
             _ => return None,
         })
+    }
+
+    /// The error in this command's params doc, when it does not parse. The doc is written by
+    /// hand next to the command, so a broken one is a bug in the command: the hosts that show
+    /// the parameters would silently show nothing.
+    pub fn params_error(&self) -> Option<String> {
+        param_keys(self.params).err()
     }
 
     pub fn info(&self, s: &Session) -> CommandInfo {
@@ -190,8 +205,40 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(artistic::specs());
         v.extend(zoom::specs());
         v.extend(compress::specs());
+        // A params doc that does not parse is a bug in the command: the hosts that show the
+        // parameters (the CLI, the command palette) would show nothing without a word.
+        for c in &v {
+            if let Err(e) = param_keys(c.params) {
+                log::warn!("command `{}` has an unreadable params doc: {e}", c.id);
+            }
+        }
+        #[cfg(test)]
+        v.extend(test_specs());
         v
     })
+}
+
+/// A command only the tests use: it asks the UI for a dialog, fills the clipboard, arms the
+/// painter and then fails, so the rollback of a failed command (none of that may survive it)
+/// can be checked.
+#[cfg(test)]
+fn test_specs() -> Vec<CommandSpec> {
+    vec![CommandSpec {
+        id: "test.askAndFail",
+        label: "Ask and fail",
+        menu: &["Test"],
+        shortcut: None,
+        params: "{}",
+        enabled: always,
+        run: |s: &mut Session, _p: &Value| {
+            s.ui_requests.push(crate::UiRequest::Dialog { id: "test".into(), params: Value::Null });
+            s.clipboard = crate::Clipboard { plain: "test".into(), ..Default::default() };
+            s.painter = Some((format::Painted::default(), false));
+            Err(EngineError::Other("this command fails on purpose".into()))
+        },
+        journal: false,
+        undoable: false,
+    }]
 }
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
