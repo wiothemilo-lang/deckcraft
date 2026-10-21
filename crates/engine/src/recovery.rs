@@ -43,12 +43,19 @@ pub fn instance_id() -> u64 {
     static ID: OnceLock<u64> = OnceLock::new();
     *ID.get_or_init(|| {
         use std::hash::{BuildHasher, Hasher};
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u32(std::process::id());
+        let h = std::collections::hash_map::RandomState::new().build_hasher();
         #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-            h.write_u128(d.as_nanos());
-        }
+        let h = {
+            // Browser runtimes have neither a process id nor std's wall clock. Document
+            // counters still make ids distinct within that runtime; native recovery also
+            // mixes in its process and clock so instances sharing a folder stay separate.
+            let mut h = h;
+            h.write_u32(std::process::id());
+            if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                h.write_u128(d.as_nanos());
+            }
+            h
+        };
         // Never 0: old entries are numbered from 1.
         ((h.finish() & UID_MASK) & !0xFF_FFFF).max(1 << 24)
     })
