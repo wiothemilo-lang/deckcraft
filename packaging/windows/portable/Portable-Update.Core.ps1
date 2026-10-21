@@ -168,13 +168,20 @@ function Enable-PortableVersion([string]$InstallRoot, [string]$PackageDirectory,
     if (!(Test-Path -LiteralPath $versions)) { New-Item -ItemType Directory -Path $versions | Out-Null }
     Assert-PlainDirectory $versions
     $destination = Join-Path $versions $Commit
-    if (Test-Path -LiteralPath $destination) { throw 'This version directory already exists. The current app has not been changed.' }
+    if (Test-Path -LiteralPath $destination) {
+        # A terminated updater may have moved the candidate without publishing its pointer.
+        # Never remove the selected version or a directory we cannot prove we own.
+        if ((Get-ActivePortableDirectory $InstallRoot) -ieq $destination) { throw 'This version is already active.' }
+        Remove-PortablePackage $destination $versions -ManagedVersion
+        if (Test-Path -LiteralPath $destination) { throw 'An existing version contains unowned or user-added files. It has been preserved.' }
+    }
+    # Persist ownership before the move, so every stranded candidate can be reconciled.
+    @{repository=$script:PortableRepository;commit=$Commit} | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $PackageDirectory '.managed-version.json') -Encoding utf8
     Move-Item -LiteralPath $PackageDirectory -Destination $destination
     $pointer = Join-Path $InstallRoot '.current-version'
     $temporaryPointer = Join-Path $InstallRoot ('.current-' + [Guid]::NewGuid().ToString('N'))
     try {
-        @{repository=$script:PortableRepository;commit=$Commit} | ConvertTo-Json |
-            Set-Content -LiteralPath (Join-Path $destination '.managed-version.json') -Encoding utf8
         # Exercise native startup before switching the launcher. Failure keeps the old version.
         $process = Start-Process -FilePath (Join-Path $destination 'DeckCraft-Fork.exe') -ArgumentList '--version' -WindowStyle Hidden -PassThru
         if (!$process.WaitForExit(15000)) { $process.Kill(); throw 'Updated executable did not start.' }

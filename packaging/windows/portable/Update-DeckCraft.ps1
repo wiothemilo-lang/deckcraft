@@ -7,11 +7,11 @@ $work = $null; $lock = $null
 try {
     $InstallRoot = (Resolve-Path -LiteralPath $InstallRoot).Path
     Assert-PlainDirectory $InstallRoot
+    try { $lock = [IO.File]::Open((Join-Path $InstallRoot '.update.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
+    catch { throw 'Another updater is already running, or this folder is not writable.' }
     $active = Get-ActivePortableDirectory $InstallRoot
     $current = Get-Content -LiteralPath (Join-Path $active 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($current.repository -cne $script:PortableRepository) { throw 'This updater only supports wiothemilo-lang/deckcraft.' }
-    try { $lock = [IO.File]::Open((Join-Path $InstallRoot '.update.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
-    catch { throw 'Another updater is already running, or this folder is not writable.' }
     foreach ($stale in @(Get-ChildItem -LiteralPath $InstallRoot -Directory -Force)) {
         if ($stale.Name -cmatch '^\.update-[a-f0-9]{32}$') {
             try { Remove-PortableWork $stale.FullName $InstallRoot } catch { Write-Warning 'An abandoned update download could not be cleaned.' }

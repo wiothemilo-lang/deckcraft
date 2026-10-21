@@ -126,9 +126,50 @@ public class DeckCraftUpdateProbe {
     Assert-True ($lines[0] -eq (Join-Path $env:LOCALAPPDATA 'DeckCraft-Fork')) 'Child settings are not isolated.'
     Assert-True ($lines[1] -eq $deckArgument) 'Presentation path quoting changed.'
     Assert-True ($env:APPDATA -eq $oldAppData) 'Parent environment changed.'
+    # Simulate process termination before movement, after movement, and after startup.
+    foreach ($checkpoint in @('before-move', 'after-move', 'after-startup')) {
+        $digit = @{ 'before-move'='5'; 'after-move'='6'; 'after-startup'='7' }[$checkpoint]
+        $commit = $digit * 40
+        $retry = New-TestPackage $commit ('retry-' + $checkpoint)
+        $stranded = Join-Path $scratch ('stranded-' + $checkpoint)
+        Expand-PortablePackage $retry.Zip $stranded $retry.Manifest $commit
+        @{repository=$script:PortableRepository;commit=$commit} | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $stranded '.managed-version.json') -Encoding utf8
+        if ($checkpoint -ne 'before-move') {
+            $candidate = Join-Path $root ('.versions\' + $commit)
+            Move-Item -LiteralPath $stranded -Destination $candidate
+            if ($checkpoint -eq 'after-startup') {
+                $p = Start-Process -FilePath (Join-Path $candidate 'DeckCraft-Fork.exe') -ArgumentList '--version' -WindowStyle Hidden -PassThru -Wait
+                Assert-True ($p.ExitCode -eq 0) 'Synthetic startup checkpoint failed.'
+            }
+        }
+        $retryStage = Join-Path $scratch ('retry-stage-' + $checkpoint)
+        Expand-PortablePackage $retry.Zip $retryStage $retry.Manifest $commit
+        Enable-PortableVersion $root $retryStage $commit
+        Assert-True ((Get-ActivePortableDirectory $root) -eq (Join-Path $root ('.versions\' + $commit))) 'Interrupted update could not retry the same release.'
+        # Termination after pointer publication must never cause the selected app to be deleted.
+        $again = Join-Path $scratch ('active-again-' + $checkpoint)
+        Expand-PortablePackage $retry.Zip $again $retry.Manifest $commit
+        Assert-Rejected { Enable-PortableVersion $root $again $commit } 'Active version was replaced during retry recovery.'
+        Assert-True (Test-Path -LiteralPath (Join-Path (Get-ActivePortableDirectory $root) 'DeckCraft-Fork.exe')) 'Active version was deleted.'
+    }
+    $protectedCommit = '8' * 40
+    $protected = New-TestPackage $protectedCommit 'protected-orphan'
+    $protectedStage = Join-Path $scratch 'protected-orphan-stage'
+    Expand-PortablePackage $protected.Zip $protectedStage $protected.Manifest $protectedCommit
+    @{repository=$script:PortableRepository;commit=$protectedCommit} | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $protectedStage '.managed-version.json') -Encoding utf8
+    'user content' | Set-Content -LiteralPath (Join-Path $protectedStage 'keep.deckcraft')
+    $protectedDestination = Join-Path $root ('.versions\' + $protectedCommit)
+    Move-Item -LiteralPath $protectedStage -Destination $protectedDestination
+    $protectedRetry = Join-Path $scratch 'protected-retry'
+    Expand-PortablePackage $protected.Zip $protectedRetry $protected.Manifest $protectedCommit
+    Assert-Rejected { Enable-PortableVersion $root $protectedRetry $protectedCommit } 'Recovery removed user-added orphan content.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $protectedDestination 'keep.deckcraft')) 'Recovery lost a user file.'
+    Assert-True ((Get-ActivePortableDirectory $root) -eq (Join-Path $root ('.versions\' + ('7' * 40)))) 'Rejected recovery changed the active app.'
     [IO.File]::WriteAllText((Join-Path $root '.current-version'), '../outside')
     Assert-Rejected { Get-ActivePortableDirectory $root } 'Invalid active version pointer was accepted.'
-    Write-Host 'PASS: checksum, ZIP traversal/duplicates, identity, failed startup/activation, atomic switch, cleanup, user files and launcher arguments.'
+    Write-Host 'PASS: checksum, ZIP traversal/duplicates, identity, failed startup/activation, atomic switch, interrupted-update retry, cleanup, user files and launcher arguments.'
 } finally {
     # Only this invocation's generated fixtures; never the installed app or shared caches.
     $full = [IO.Path]::GetFullPath($scratch)

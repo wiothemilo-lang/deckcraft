@@ -46,6 +46,8 @@ embedded build commit. It accepts only the expected flat package files, rejects 
 traversal entries, caps downloads at 128 MiB and expanded packages at 256 MiB, and requires 1 GiB
 free. A new version is staged under `.versions/<commit>` and startup-tested before an atomic
 `.current-version` switch. Download, extraction or startup failure preserves the active version.
+Ownership is persisted before candidate movement; a retry can reclaim an interrupted, non-active
+candidate of the same release, while preserving active versions and directories with user files.
 A lock serializes launcher/update operations; launcher processes exit after starting the app.
 
 The original base package is retained, and unused downloaded versions are cleaned only when
@@ -71,5 +73,6 @@ on a particular laptop GPU. Full quality gates remain in the separate `ci` workf
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Interrupted activation can retry the same release; ownership precedes movement |
 | 2026-10-21 | minor | Desktop update action, bounded staged installs, automatic main builds and CI-gated public releases |
 | 2026-10-21 | minor | Windows x64 portable fork bundle, Desktop shortcut and separate preferences/recovery |
