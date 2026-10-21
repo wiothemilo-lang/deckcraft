@@ -240,7 +240,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Recovery retains missing-part warnings and opens repaired copies without an implicit save destination. Checkpoint destination metadata is replaced before re-encoding document bytes; fault tests preserve the previous snapshot and repaired-copy policy across restart. #1092 remains unresolved; scores unchanged |
+| 2026-10-21 | minor | Recovery retains missing-part warnings and opens repaired copies without an implicit save destination. Checkpoint destination metadata is replaced before the re-encoded document bytes; fault tests preserve the previous snapshot and repaired-copy policy across restart. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | SmartArt stays P after covering opaque graph identity through clipboard commands and cleanup of rejected graph data; breadth and aggregate scores unchanged |
 | 2026-10-21 | minor | SmartArt remains P after retaining opaque root hyperlinks and bounding nested relationship decoding before allocation; breadth unchanged |
 | 2026-10-20 | minor | SmartArt remains P after preserving bounded nested relationships on the opaque path (#203 partial); rendering/editing breadth and aggregate scores unchanged |
