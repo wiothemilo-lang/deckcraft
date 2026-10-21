@@ -44,6 +44,10 @@ contributor-generated checkpoints. It checks the warning, repaired/unsaved state
 request on ordinary Save, byte-for-byte preservation of the original and checkpoint during open
 and path selection, and explicit saving of the repaired copy. Refused metadata and document
 checkpoint writes also retain the previous snapshot; a restart must still require a save location.
+Additional faults at detachment, document replacement and final destination publication cover
+stale healthy checkpoints left after failed Save As cleanup. Ordinary Save after recovery must
+never send those older bytes to the newer saved file. Completed checkpoints retain the matching
+path. Both conservative and final metadata representations are checked against the reader limit.
 
 A separate bounded workflow saves 18 slides repeatedly in both native and PPTX formats, checks
 each reopen, adds unsaved slide 19, and exercises missing/invalid video input plus a failed Save As.
@@ -58,10 +62,11 @@ a desktop-package build. Both run on GitHub; a browser startup check continues t
 
 Manual saves use an exclusively created temporary sibling, flush it with `sync_all`, rename it
 over the destination and only then mark the document saved. Recovery's document and metadata
-remain separate replacements, not a transaction across both files. The save destination metadata
-is committed first: a failed metadata write cannot leave a re-encoded partial snapshot paired with
-the old destination. If the document replacement fails instead, the previous snapshot remains
-readable with the more conservative destination policy. Sudden power-loss durability,
+remain separate replacements, not a transaction across both files. Each checkpoint first records
+a null save destination, then replaces the document, then publishes the matching destination.
+A failure before detachment leaves the previous pair intact. Later failures leave a detached
+checkpoint, so older or partial content cannot acquire a newly published destination. Publishing
+is skipped when the final destination is already null. Sudden power-loss durability,
 real incident media/decoder behavior and the reported corrupt PPTX still require investigation
 with evidence. The tests do not certify those cases.
 
@@ -69,4 +74,4 @@ with evidence. The tests do not certify those cases.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Record the unresolved #1092 report, preserve-evidence procedure and checked recovery policy; destination metadata precedes document replacement, with restart tests for failed writes and explicit durability limits |
+| 2026-10-21 | minor | Record the unresolved #1092 report, preserve-evidence procedure and checked recovery policy; checkpoint destinations are detached before replacement and published only for matching new bytes; restart tests cover each failed write and explicit durability limits |

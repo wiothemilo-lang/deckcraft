@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint metadata precedes document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint destination publication follows document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -45,7 +45,8 @@ Other browser/driver combinations and hardware WebGPU still need runtime coverag
 - **Protection added:** checked recovery opens report missing media/chart sidecars and require a
   new save destination. Small regressions cover damaged checkpoints and repeated native/PPTX saves
   followed by handled video-input/save failures, preserving originals and unsaved checkpoints.
-  Destination metadata is replaced first; failed metadata/document writes are covered across restart.
+  Checkpoints detach their destination before replacement and publish it only for matching new
+  bytes; failure/restart tests include stale checkpoints left by failed Save As cleanup.
 - **Remaining:** preserve incident evidence, obtain reproduction details, investigate decoder and
   durability paths. Recovery document/metadata are still separate replacements. See
   [data-recovery.md](data-recovery.md). Effort cannot be estimated without evidence. **Beta blocker.**
@@ -392,7 +393,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Recovery retains missing-part warnings and opens repaired copies without an implicit save destination. Checkpoint destination metadata is replaced before the re-encoded document bytes; fault tests preserve the previous snapshot and repaired-copy policy across restart. #1092 remains unresolved; scores unchanged |
+| 2026-10-21 | minor | Recovery keeps damaged copies detached. Checkpoint updates detach the destination, replace document bytes, then publish the matching path. Fault tests cover every replacement and restart, including stale checkpoints after failed Save As cleanup. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |

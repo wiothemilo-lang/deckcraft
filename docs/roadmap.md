@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint metadata precedes document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint destination publication follows document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -113,7 +113,7 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Recovery retains missing-part warnings and opens repaired copies without an implicit save destination. Checkpoint destination metadata is replaced before the re-encoded document bytes; fault tests preserve the previous snapshot and repaired-copy policy across restart. #1092 remains unresolved; scores unchanged |
+| 2026-10-21 | minor | Recovery keeps damaged copies detached. Checkpoint updates detach the destination, replace document bytes, then publish the matching path. Fault tests cover every replacement and restart, including stale checkpoints after failed Save As cleanup. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |

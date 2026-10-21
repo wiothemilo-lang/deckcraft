@@ -148,18 +148,33 @@ fn save_within(s: &Session, dir: &Path, max_bytes: u64) -> Result<usize> {
         if bytes.len() as u64 > max_bytes {
             return Err(EngineError::Other("recovery snapshot is larger than DeckCraft can reopen".into()));
         }
-        let m = json!({"path": d.path, "title": d.title(), "saved": now_secs(), "owner": instance_id()}).to_string();
-        if m.len() as u64 > MAX_META_BYTES {
-            return Err(EngineError::Other("recovery metadata is larger than DeckCraft can reopen".into()));
-        }
-        // Commit the destination policy first. Re-encoding a repaired copy writes empty
-        // members for missing payloads; it may no longer trigger the reader's damage warning.
-        // A failed metadata write must not leave that new snapshot paired with the old path.
-        write_atomic(&meta, m.as_bytes())?;
-        write_atomic(&doc, &bytes)?;
+        let metadata = json!({"path": d.path, "title": d.title(), "saved": now_secs(), "owner": instance_id()});
+        write_checkpoint(&doc, &bytes, &meta, metadata, write_atomic)?;
         n += 1;
     }
     Ok(n)
+}
+
+/// Detach any previous checkpoint before replacement; publish a destination only for new bytes.
+/// Both metadata forms must fit the reader's limit before the first write. The writer argument
+/// lets tests refuse each replacement independently without filesystem-permission assumptions.
+fn write_checkpoint(doc: &Path, bytes: &[u8], meta: &Path, mut metadata: Value, mut write: impl FnMut(&Path, &[u8]) -> Result<()>) -> Result<()> {
+    let committed = metadata.to_string();
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert("path".into(), Value::Null);
+    }
+    let conservative = metadata.to_string();
+    if committed.len() as u64 > MAX_META_BYTES || conservative.len() as u64 > MAX_META_BYTES {
+        return Err(EngineError::Other("recovery metadata is larger than DeckCraft can reopen".into()));
+    }
+    // Re-encoding missing payloads can remove damage warnings. Conversely, Save As can leave an
+    // old checkpoint behind if cleanup fails. Neither old nor partial bytes may gain a new path.
+    write(meta, conservative.as_bytes())?;
+    write(doc, bytes)?;
+    if committed != conservative {
+        write(meta, committed.as_bytes())?;
+    }
+    Ok(())
 }
 
 /// Entries in `dir`: (uid, metadata).
@@ -361,6 +376,88 @@ mod tests {
         assert_eq!(std::fs::read(&meta_path).unwrap(), previous_meta);
         assert_eq!(deckcraft_format::load(&previous_doc).unwrap().slides.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stale checkpoint left behind by failed Save As cleanup must never gain the new path
+    /// before its document bytes have been replaced. Refuse every replacement, then restart.
+    #[test]
+    fn checkpoint_failures_do_not_publish_new_destinations_for_old_content() {
+        for failed_write in 1..=4 {
+            let root = temp(&format!("recovery-publish-path-{failed_write}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let dir = root.join("recovery");
+            let old_path = root.join("old.deckcraft");
+            let new_path = root.join("new.deckcraft");
+            let mut run = Session::with_new();
+            run.recovery_dir = Some(dir.clone());
+            run.execute("file.saveAs", &json!({"path": old_path.to_string_lossy()})).unwrap();
+            run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+            save(&run, &dir).unwrap();
+            let uid = run.doc().unwrap().uid;
+            let (doc_path, meta_path) = files(&dir, uid);
+            let previous_doc = std::fs::read(&doc_path).unwrap();
+            let previous_meta = std::fs::read(&meta_path).unwrap();
+            run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+            run.execute("file.saveAs", &json!({"path": new_path.to_string_lossy()})).unwrap();
+            // Restore the observable result of failed cleanup: a two-slide checkpoint still
+            // exists, while Save As has successfully saved three slides at the new destination.
+            std::fs::write(&doc_path, &previous_doc).unwrap();
+            std::fs::write(&meta_path, &previous_meta).unwrap();
+            let old_file = std::fs::read(&old_path).unwrap();
+            let new_file = std::fs::read(&new_path).unwrap();
+            run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+            let next_doc = deckcraft_format::save(&run.doc().unwrap().doc).unwrap();
+            let next_meta = json!({"path": run.doc().unwrap().path, "title": "new", "saved": now_secs(), "owner": instance_id()});
+            let mut writes = 0;
+            let result = write_checkpoint(&doc_path, &next_doc, &meta_path, next_meta, |path, bytes| {
+                writes += 1;
+                if writes == failed_write {
+                    return Err(EngineError::Other("injected checkpoint replacement failure".into()));
+                }
+                write_atomic(path, bytes)
+            });
+            assert_eq!(result.is_err(), failed_write <= 3);
+            assert_eq!(std::fs::read(&old_path).unwrap(), old_file);
+            assert_eq!(std::fs::read(&new_path).unwrap(), new_file);
+            drop(run);
+
+            let mut recovered = Session::new();
+            recovered.recovery_dir = Some(dir.clone());
+            assert_eq!(open(&mut recovered, &dir).unwrap(), vec![0]);
+            let st = recovered.doc().unwrap();
+            assert!(st.is_dirty());
+            assert_eq!(st.doc.slides.len(), if failed_write <= 2 { 2 } else { 4 });
+            if failed_write == 1 {
+                assert_eq!(st.path.as_deref(), old_path.to_str(), "the first refused write leaves the old pair intact");
+            } else if failed_write <= 3 {
+                assert!(st.path.is_none(), "incomplete checkpoint replacement cannot publish the new destination");
+            } else {
+                assert_eq!(st.path.as_deref(), new_path.to_str(), "a completed checkpoint publishes its matching destination");
+            }
+            let saved = recovered.execute("file.save", &json!({})).unwrap();
+            if matches!(failed_write, 2 | 3) {
+                assert_eq!(saved, json!({"needsPath": true}));
+            }
+            let saved_bytes = std::fs::read(&new_path).unwrap();
+            assert_eq!(deckcraft_format::load(&saved_bytes).unwrap().slides.len(), if failed_write <= 3 { 3 } else { 4 });
+            if failed_write <= 3 {
+                assert_eq!(saved_bytes, new_file, "a failed checkpoint cannot cause Save to overwrite the newer file");
+            }
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// Null is two bytes longer than an empty path: validate the conservative metadata too.
+    #[test]
+    fn both_checkpoint_metadata_forms_are_bounded_before_any_write() {
+        let committed = json!({"path": "", "title": ""}).to_string();
+        let padding = MAX_META_BYTES as usize - committed.len();
+        let metadata = json!({"path": "", "title": "x".repeat(padding)});
+        assert_eq!(metadata.to_string().len() as u64, MAX_META_BYTES);
+        let result = write_checkpoint(Path::new("unused.deckcraft"), b"unused", Path::new("unused.json"), metadata, |_, _| {
+            panic!("oversized conservative metadata must be refused before any write")
+        });
+        assert!(result.unwrap_err().to_string().contains("metadata"));
     }
 
     #[test]
