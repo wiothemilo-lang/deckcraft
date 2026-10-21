@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (media playback options survive PPTX save/reopen through standard timing nodes, including video full screen; working round-trip features are separated from remaining workflow shortfalls; rewind round-trips and EMF+ records render; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -115,10 +115,13 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-20 | trivial | Separated working round-trip features from the remaining workflow shortfalls; readiness scores unchanged |
 | 2026-10-20 | minor | Media playback options (#74), including full-screen video, round-trip through standard timing nodes. Core workflow and beta item 3 narrowed; overall estimates unchanged pending a new calibration |
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips, so the alpha gate row, the current focus, beta item 3 and the 2026-10-07 history keep only the media playback options (#74); the EMF+ records leave the open list (they are drawn) |
 | 2026-10-18 | minor | Localization: the string catalog, the language setting and Vietnamese landed (#15); beta item 6 narrows to five languages (19–32 h) and the dimension reads ~20% |
+| 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
+| 2026-10-15 | trivial | Native save/reopen retains imported chart workbooks and related parts; headless command tests cover a PPTX → native → PPTX cycle and stale-workbook rejection. Milestone scope and scores unchanged |
 | 2026-10-15 | trivial | PPTX trigger click steps survive save, including by-paragraph builds. Interactive-deck gaps remain media actions, audio triggers and click-box geometry; milestone scope and feature scores unchanged |
 | 2026-10-14 | trivial | M13 reliability: remote MCP validates IDs and envelopes, caps replies and rejects incomplete frames; #718 |
 | 2026-10-14 | minor | Community PR wave folded: one Review gate row, one Current focus item 2, one beta row each for items 9 and 10 (timeline and timer controls are in), one after-beta paragraph, one M9 and M10 row, one corpus row in the 2026-10-07 history |
