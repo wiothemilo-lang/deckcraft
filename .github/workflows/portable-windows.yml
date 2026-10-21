@@ -1,11 +1,14 @@
 name: Windows portable fork
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   pull_request:
     paths:
       - .github/workflows/portable-windows.yml
       - packaging/windows/portable/**
+      - packaging/windows/test-portable-updater.ps1
 
 permissions:
   contents: read
@@ -37,6 +40,9 @@ jobs:
           ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
           path: craft-fonts
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Check updater safety offline
+        shell: powershell
+        run: packaging/windows/test-portable-updater.ps1
       - name: Build native release executable
         run: cargo build --locked --release -p deckcraft --target x86_64-pc-windows-msvc
       - name: Assemble and smoke-test portable bundle
@@ -70,11 +76,68 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP 'DeckCraft-Fork-Windows-x64.zip'
           Compress-Archive -Path $bundle -DestinationPath $zip
           (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash | Set-Content "$zip.sha256"
+          @{
+            schema = 1
+            repository = $env:SOURCE_REPOSITORY
+            channel = 'main'
+            commit = $env:GITHUB_SHA
+            sha256 = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+            size = (Get-Item -LiteralPath $zip).Length
+          } | ConvertTo-Json | Set-Content (Join-Path $env:RUNNER_TEMP 'update.json') -Encoding utf8
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: DeckCraft-Fork-Windows-x64
           path: |
             ${{ runner.temp }}/DeckCraft-Fork-Windows-x64.zip
             ${{ runner.temp }}/DeckCraft-Fork-Windows-x64.zip.sha256
+            ${{ runner.temp }}/update.json
           retention-days: 14
           if-no-files-found: error
+
+  publish:
+    name: Publish tested fork update
+    needs: portable
+    if: github.repository == 'wiothemilo-lang/deckcraft' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: ${{ github.sha }}
+    steps:
+      # Publishing has a write token; no repository code or dependency build scripts run here.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: DeckCraft-Fork-Windows-x64
+          path: portable
+      - name: Require full CI on the same main commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?head_sha=$BUILD_SHA&branch=main&event=push&per_page=20" --jq '.workflow_runs[0].id // empty')"
+          if [[ -z "$run_id" ]]; then
+            echo 'No main CI run found for this exact commit. Rerun after CI is available.' >&2
+            exit 1
+          fi
+          gh run watch "$run_id" --exit-status --interval 30
+      - name: Publish complete update assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="fork-windows-$BUILD_SHA"
+          if gh release view "$tag" --json isDraft > release-state.json 2>/dev/null; then
+            if [[ "$(jq -r '.isDraft' release-state.json)" == false ]]; then
+              echo 'This commit already has a published update; keeping its original assets.'
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$BUILD_SHA" --draft --prerelease \
+              --title "DeckCraft Fork Windows ${BUILD_SHA:0:7}" \
+              --notes 'Windows x64 contributor build. Full CI and portable startup checks passed on this main commit. This is not an official ArtCraft release.'
+          fi
+          gh release upload "$tag" portable/DeckCraft-Fork-Windows-x64.zip \
+            portable/DeckCraft-Fork-Windows-x64.zip.sha256 portable/update.json --clobber
+          gh release edit "$tag" --draft=false --prerelease
