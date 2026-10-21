@@ -27,9 +27,12 @@ jobs:
       CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check out openly licensed fonts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: storytold/craft-fonts
           ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
           path: craft-fonts
