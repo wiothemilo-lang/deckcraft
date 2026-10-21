@@ -230,3 +230,14 @@ function Remove-PortableWork([string]$Directory, [string]$InstallRoot) {
     }
     Remove-Item -LiteralPath $full
 }
+
+function Clear-PortableInterruptedDownloads([string]$InstallRoot) {
+    # Caller holds .update.lock, so an owned work directory cannot belong to a live update.
+    Assert-PlainDirectory $InstallRoot
+    foreach ($stale in @(Get-ChildItem -LiteralPath $InstallRoot -Directory -Force)) {
+        if ($stale.Name -cmatch '^\.update-[a-f0-9]{32}$') {
+            try { Remove-PortableWork $stale.FullName $InstallRoot }
+            catch { Write-Warning 'An abandoned update download could not be cleaned.' }
+        }
+    }
+}

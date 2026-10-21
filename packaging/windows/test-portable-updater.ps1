@@ -111,8 +111,12 @@ public class DeckCraftUpdateProbe {
     @{repository=$script:PortableRepository;directory=[IO.Path]::GetFileName($stale)} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $stale '.owner.json')
     'partial download' | Set-Content -LiteralPath (Join-Path $stale 'package.zip')
-    Remove-PortableWork $stale $root
+    $unownedWork = Join-Path $root ('.update-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $unownedWork | Out-Null
+    'unowned' | Set-Content -LiteralPath (Join-Path $unownedWork 'package.zip')
+    Clear-PortableInterruptedDownloads $root
     Assert-True (!(Test-Path -LiteralPath $stale)) 'Owned interrupted download was not cleaned.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $unownedWork 'package.zip')) 'Startup cleanup removed an unowned directory.'
     # Exercise the actual launcher, argument quoting and child-only settings after activation.
     $probeOutput = Join-Path $scratch 'launch result.txt'
     $deckArgument = Join-Path $scratch 'a presentation & spaces.pptx'
@@ -132,6 +136,13 @@ public class DeckCraftUpdateProbe {
         $commit = $digit * 40
         $retry = New-TestPackage $commit ('retry-' + $checkpoint)
         $stranded = Join-Path $scratch ('stranded-' + $checkpoint)
+        if ($checkpoint -eq 'before-move') {
+            $work = Join-Path $root ('.update-' + [Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $work | Out-Null
+            @{repository=$script:PortableRepository;directory=[IO.Path]::GetFileName($work)} | ConvertTo-Json |
+                Set-Content -LiteralPath (Join-Path $work '.owner.json') -Encoding utf8
+            $stranded = Join-Path $work 'package'
+        }
         Expand-PortablePackage $retry.Zip $stranded $retry.Manifest $commit
         @{repository=$script:PortableRepository;commit=$commit} | ConvertTo-Json |
             Set-Content -LiteralPath (Join-Path $stranded '.managed-version.json') -Encoding utf8
@@ -142,6 +153,9 @@ public class DeckCraftUpdateProbe {
                 $p = Start-Process -FilePath (Join-Path $candidate 'DeckCraft-Fork.exe') -ArgumentList '--version' -WindowStyle Hidden -PassThru -Wait
                 Assert-True ($p.ExitCode -eq 0) 'Synthetic startup checkpoint failed.'
             }
+        } else {
+            Clear-PortableInterruptedDownloads $root
+            Assert-True (!(Test-Path -LiteralPath $work)) 'Startup cleanup left the pre-move interrupted package.'
         }
         $retryStage = Join-Path $scratch ('retry-stage-' + $checkpoint)
         Expand-PortablePackage $retry.Zip $retryStage $retry.Manifest $commit

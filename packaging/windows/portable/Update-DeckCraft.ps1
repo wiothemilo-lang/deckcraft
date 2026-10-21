@@ -12,11 +12,7 @@ try {
     $active = Get-ActivePortableDirectory $InstallRoot
     $current = Get-Content -LiteralPath (Join-Path $active 'BUILD-INFO.json') -Raw | ConvertFrom-Json
     if ($current.repository -cne $script:PortableRepository) { throw 'This updater only supports wiothemilo-lang/deckcraft.' }
-    foreach ($stale in @(Get-ChildItem -LiteralPath $InstallRoot -Directory -Force)) {
-        if ($stale.Name -cmatch '^\.update-[a-f0-9]{32}$') {
-            try { Remove-PortableWork $stale.FullName $InstallRoot } catch { Write-Warning 'An abandoned update download could not be cleaned.' }
-        }
-    }
+    Clear-PortableInterruptedDownloads $InstallRoot
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($InstallRoot))
     if ($drive.AvailableFreeSpace -lt 1GB) { throw 'Keep at least 1 GB free before updating.' }
     $work = Join-Path $InstallRoot ('.update-' + [Guid]::NewGuid().ToString('N'))
