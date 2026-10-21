@@ -200,6 +200,149 @@ fn a_recovered_presentation_that_was_never_saved_asks_for_a_path() {
     done(&root);
 }
 
+/// Remove one member of a contributor-generated native archive, retaining its manifest reference.
+fn without_member(bytes: &[u8], missing: &str) -> Vec<u8> {
+    use std::io::{Cursor, Read, Write};
+
+    let mut source = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+    assert!(source.index_for_name(missing).is_some(), "the fixture must actually lose a member");
+    let mut output = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for i in 0..source.len() {
+        let mut member = source.by_index(i).unwrap();
+        if member.name() == missing {
+            continue;
+        }
+        let mut data = Vec::new();
+        member.read_to_end(&mut data).unwrap();
+        output.start_file(member.name(), zip::write::SimpleFileOptions::default()).unwrap();
+        output.write_all(&data).unwrap();
+    }
+    output.finish().unwrap().into_inner()
+}
+
+/// Recovery must apply the damaged-file protection used by normal Open, including chart sidecars.
+#[test]
+fn damaged_recovery_snapshots_cannot_silently_overwrite_the_original() {
+    use deckcraft_model::chart::{Chart, ChartPart, ChartType};
+    use deckcraft_model::{Shape, ShapeKind};
+    use std::sync::Arc;
+
+    for chart in [false, true] {
+        let root = temp(if chart { "damaged-chart" } else { "damaged-media" });
+        let dir = root.join("recovery");
+        let original = root.join("original.deckcraft");
+        let mut run = Session::with_new();
+        run.recovery_dir = Some(dir.clone());
+        let doc = Arc::make_mut(&mut run.doc_mut().unwrap().doc);
+        let missing = if chart {
+            let mut chart = Chart::sample(ChartType::Pie);
+            chart.kept.parts.push(ChartPart {
+                name: "ppt/embeddings/owned.bin".into(),
+                content_type: "application/octet-stream".into(),
+                bytes: vec![1, 3, 5, 7],
+                native_entry: None,
+            });
+            let id = ShapeId(doc.alloc_id().unwrap());
+            Arc::make_mut(&mut doc.slides[0]).shapes.push(Shape { id, kind: ShapeKind::Chart(Box::new(chart)), ..Default::default() });
+            "chart-parts/0".to_string()
+        } else {
+            let media = doc.add_media("owned.bin", "application/octet-stream", vec![2, 4, 6, 8]).unwrap();
+            format!("media/{}", media.0)
+        };
+        run.execute("file.saveAs", &json!({"path": original.to_string_lossy()})).unwrap();
+        let original_bytes = std::fs::read(&original).unwrap();
+        assert!(deckcraft_format::load_checked(&original_bytes).unwrap().1.is_empty());
+        run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        run.execute("file.recovery.save", &json!({})).unwrap();
+        let uid = run.doc().unwrap().uid;
+        let snapshot = dir.join(format!("{uid}.deckcraft"));
+        let damaged = without_member(&std::fs::read(&snapshot).unwrap(), &missing);
+        assert_eq!(deckcraft_format::load_checked(&damaged).unwrap().1.len(), 1);
+        std::fs::write(&snapshot, &damaged).unwrap();
+        drop(run);
+
+        let mut next = Session::new();
+        next.recovery_dir = Some(dir.clone());
+        assert_eq!(next.execute("file.recovery.open", &json!({})).unwrap()["opened"], json!([0]));
+        let st = next.doc().unwrap();
+        assert!(st.path.is_none(), "a partial recovery must not keep its original save destination");
+        assert!(st.is_dirty());
+        assert_eq!(st.doc.slides.len(), 2);
+        assert!(st.title().contains("(Recovered)") && st.title().ends_with("(Repaired)"));
+        assert!(
+            next.ui_requests.iter().any(|r| matches!(r, UiRequest::Message { text } if text.contains("repaired copy") && text.contains("new name")))
+        );
+        assert_eq!(std::fs::read(&snapshot).unwrap(), damaged, "opening retains the checkpoint bytes");
+
+        assert_eq!(next.execute("file.save", &json!({})).unwrap(), json!({"needsPath": true}));
+        assert!(next.ui_requests.iter().any(|r| matches!(r, UiRequest::PickFile { purpose } if purpose == "saveAs")));
+        assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+        assert_eq!(std::fs::read(&snapshot).unwrap(), damaged, "asking for a path retains recovery");
+        assert_eq!(meta_of(&dir, uid)["path"], json!(original.to_string_lossy()), "opening keeps the original metadata for triage");
+
+        let copy = root.join("repaired-copy.deckcraft");
+        next.execute("file.saveAs", &json!({"path": copy.to_string_lossy()})).unwrap();
+        assert_eq!(deckcraft_format::load(&std::fs::read(copy).unwrap()).unwrap().slides.len(), 2);
+        assert_eq!(std::fs::read(&original).unwrap(), original_bytes, "saving a copy leaves the original intact");
+        assert!(!snapshot.exists(), "a successful explicit save ends this copy's recovery");
+        done(&root);
+    }
+}
+
+/// Handled media/read and write failures keep the saved deck, unsaved work and its checkpoint.
+/// This small synthetic workflow is not a reproduction of the unknown video crash in #1092.
+#[test]
+fn repeated_saves_and_failed_video_insert_or_save_preserve_work() {
+    use std::sync::Arc;
+
+    for extension in ["deckcraft", "pptx"] {
+        let root = temp(&format!("save-errors-{extension}"));
+        let original = root.join(format!("portfolio.{extension}"));
+        let dir = root.join("recovery");
+        let mut run = Session::with_new();
+        run.recovery_dir = Some(dir.clone());
+        run.execute("file.saveAs", &json!({"path": original.to_string_lossy()})).unwrap();
+        for count in 2..=18 {
+            run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+            run.execute("file.save", &json!({})).unwrap();
+            let saved = std::fs::read(&original).unwrap();
+            let (doc, damage) = super::open_checked(&original.to_string_lossy(), &saved).unwrap();
+            assert_eq!(doc.slides.len(), count);
+            assert!(damage.is_empty());
+        }
+        let original_bytes = std::fs::read(&original).unwrap();
+        run.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        run.execute("file.recovery.save", &json!({})).unwrap();
+        let uid = run.doc().unwrap().uid;
+        let snapshot = dir.join(format!("{uid}.deckcraft"));
+        let snapshot_bytes = std::fs::read(&snapshot).unwrap();
+        let metadata = std::fs::read(dir.join(format!("{uid}.json"))).unwrap();
+        let before = run.doc().unwrap().doc.clone();
+        let saved_before = run.doc().unwrap().saved_doc.clone();
+        assert!(run.execute("insert.video", &json!({"path": root.join("missing.mp4").to_string_lossy()})).is_err());
+        assert!(run.execute("insert.video", &json!({"name": "not-video.txt", "data": crate::cmd::base64_encode(b"owned text")})).is_err());
+        let blocked = root.join(format!("a-directory.{extension}"));
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(run.execute("file.saveAs", &json!({"path": blocked.to_string_lossy()})).is_err());
+        let st = run.doc().unwrap();
+        assert!(Arc::ptr_eq(&st.doc, &before) && Arc::ptr_eq(&st.saved_doc, &saved_before));
+        assert!(st.is_dirty());
+        assert_eq!(st.path.as_deref(), original.to_str());
+        assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+        assert_eq!(std::fs::read(&snapshot).unwrap(), snapshot_bytes);
+        assert_eq!(std::fs::read(dir.join(format!("{uid}.json"))).unwrap(), metadata);
+        drop(run);
+
+        let mut next = Session::new();
+        next.recovery_dir = Some(dir.clone());
+        next.execute("file.recovery.open", &json!({})).unwrap();
+        assert_eq!(next.doc().unwrap().doc.slides.len(), 19);
+        assert!(next.doc().unwrap().is_dirty());
+        assert_eq!(std::fs::read(&original).unwrap(), original_bytes, "recovery does not replace the 18 saved slides");
+        done(&root);
+    }
+}
+
 #[test]
 fn recovery_discard_takes_one_entry_or_the_whole_folder() {
     let root = temp("discard");

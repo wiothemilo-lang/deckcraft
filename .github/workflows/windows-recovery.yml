@@ -1,0 +1,61 @@
+name: Windows recovery
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/engine/**
+      - crates/model/**
+      - crates/media/**
+      - crates/format/**
+      - crates/pptx/**
+      - .github/workflows/windows-recovery.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/engine/**
+      - crates/model/**
+      - crates/media/**
+      - crates/format/**
+      - crates/pptx/**
+      - .github/workflows/windows-recovery.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recovery:
+    name: Recovery and save failures (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out openly licensed fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: storytold/craft-fonts
+          ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+          path: craft-fonts
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: windows-recovery
+      - name: Test native recovery and command save-error paths
+        run: cargo test --locked --package deckcraft-engine --lib recovery -- --test-threads=1

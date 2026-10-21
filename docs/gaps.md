@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -18,7 +18,7 @@ revision history.
 | # | Gap | Category | Beta | Hours | Doc |
 |---|---|---|:-:|---|---|
 | 1 | PPTX corpus is only decks we author (no PowerPoint reference renders) | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
-| 2 | Data loss and crashes on common paths (#60, #40, #59) | Stability | B | 6–12 | this file |
+| 2 | Saved-slide loss investigation (#1092); Windows startup crashes (#40, #59) | Stability | B | unscoped + 4–8 | this file |
 | 3 | SVG pictures don't render (EMF/WMF do) | File format | B | 4–8 | [file-format-parity.md](file-format-parity.md) |
 | 4 | Localization: a Vietnamese draft plus 5 beta languages and native review | Localization | B (5 languages) | 40–73 | [localization-parity.md](localization-parity.md) |
 | 5 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
@@ -38,10 +38,19 @@ Web startup #959 is covered by a platform-specific document-ID fix and the actua
 startup smoke in `.github/workflows/web-smoke.yml`; WASM compilation alone is insufficient.
 Other browser/driver combinations and hardware WebGPU still need runtime coverage.
 
-### Close discards an edited presentation without asking (#60)
-- **Evidence:** issue #60; quitting prompts, `file.close` doesn't. PR #75 is open.
-- **Impact:** silent data loss on a common path. The worst kind of bug for a presentation app.
-- **Estimate:** 0.5–1 h (land and test #75). **Beta blocker.**
+### Saved-slide loss after video-insert crash (#1092; unresolved)
+- **Evidence:** user report dated 2026-10-20: repeated saves of 18 slides, crash inserting video
+  on slide 19, two slides after reopening, corrupt PPTX conversion. OS/version/original format and
+  fixture are unknown. No reproduction or incident root cause is established.
+- **Protection added:** checked recovery opens report missing media/chart sidecars and require a
+  new save destination. Small regressions cover damaged checkpoints and repeated native/PPTX saves
+  followed by handled video-input/save failures, preserving originals and unsaved checkpoints.
+- **Remaining:** preserve incident evidence, obtain reproduction details, investigate decoder and
+  durability paths. Recovery document/metadata are still separate replacements. See
+  [data-recovery.md](data-recovery.md). Effort cannot be estimated without evidence. **Beta blocker.**
+
+The fork's UI already prompts on dirty close; upstream #60's open state alone is not evidence of a
+current silent-close defect here.
 
 ### Startup crashes on some Windows GPUs (#40, #59)
 - **Evidence:** #59 (Intel UHD, access violation in `igvk64.dll` during Vulkan enumeration), #40
@@ -382,6 +391,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Recovery now keeps damage warnings for missing media/chart sidecars and opens a repaired copy without an implicit save destination. Synthetic save/error/checkpoint coverage added; #1092 remains unresolved pending incident evidence; readiness scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |

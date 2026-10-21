@@ -131,7 +131,7 @@ pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
 /// What a file lost on opening.
 #[derive(Debug, Default, Clone)]
 pub struct Damage {
-    /// Pictures and media a `.deckcraft` file had lost or damaged.
+    /// Embedded media and retained chart parts a `.deckcraft` file had lost or damaged.
     pub media: Vec<String>,
     /// Slides a `.pptx` lists but that couldn't be read, so they are not in the presentation.
     pub slides: Vec<String>,
@@ -258,8 +258,8 @@ fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts, "damagedMedia": damaged.media, "lostSlides": damaged.slides}))
 }
 
-/// Tell the user which pictures, media and slides a damaged file lost, and mark the copy repaired.
-fn report_damage(s: &mut Session, damaged: &Damage) -> Result<()> {
+/// Report a damaged file's missing content and mark the open copy repaired.
+pub(crate) fn report_damage(s: &mut Session, damaged: &Damage) -> Result<()> {
     if damaged.is_empty() {
         return Ok(());
     }

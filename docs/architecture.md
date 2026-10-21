@@ -1,6 +1,6 @@
 # DeckCraft architecture
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
@@ -76,6 +76,10 @@ overlays an invisible real-text layer with embedded font subsets.
   entry cap. Save preflights payloads before cloning them, then streams manifest JSON under
   the entry limit. Recovery also checks its encoded snapshot (2 GiB) and metadata (64 KiB)
   limits before replacing either member; refusals preserve the previous checkpoint.
+  Recovery opens use the checked native reader: missing media/chart sidecars produce a repaired
+  copy with a warning and no implicit save destination, preserving the original on ordinary Save.
+  Healthy checkpoints retain their original path. See [data-recovery.md](data-recovery.md) for
+  incident triage, regression coverage and durability limits.
 - Formats and their gaps: [file-format-parity.md](file-format-parity.md).
 
 ## Quality gates
@@ -85,7 +89,8 @@ overlays an invisible real-text layer with embedded font subsets.
 MCP server and the web app. A separate `Web startup` workflow builds the actual web bundle
 and runs Chromium against sample/blank and forced WebGL routes, checking runtime errors, loading
 completion and canvas initialization. It uses a software renderer and does not certify hardware
-WebGPU. CI runs it on Ubuntu for every PR
+WebGPU. A focused `Windows recovery` workflow checks recovery and command save-error paths on
+Windows without building a desktop package. The full Rust and browser checks run on Ubuntu for every PR
 and push to `main`;
 macOS is built and tested by the release workflow only. Releases (pushes to `release`) build signed
 macOS, Windows, Linux, FreeBSD and web artifacts.
@@ -94,6 +99,7 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Recovery now keeps damage warnings for missing media/chart sidecars and opens a repaired copy without an implicit save destination. Synthetic save/error/checkpoint coverage added; #1092 remains unresolved pending incident evidence; readiness scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |

@@ -189,6 +189,8 @@ pub fn list(dir: &Path) -> Vec<(u64, Value)> {
 /// running instance, unreadable entries and entries already open here are left alone. Returns the
 /// opened documents' indices. At most [`MAX_REOPEN`] are opened per start, the newest first; the rest
 /// wait for the next one.
+/// Missing media/chart parts are reported as damage and the recovered copy needs an explicit save
+/// destination, so an ordinary Save cannot silently replace the original with partial content.
 pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
     let me = instance_id();
     let mut opened = Vec::new();
@@ -209,9 +211,12 @@ pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
         }
         let (doc, meta_path) = files(dir, uid);
         let Some(bytes) = read_regular(&doc, MAX_ENTRY_BYTES) else { continue };
-        let Ok(mut d) = deckcraft_format::load(&bytes) else { continue };
+        let Ok((mut d, media)) = deckcraft_format::load_checked(&bytes) else { continue };
         deckcraft_format::repair(&mut d);
-        let path = meta.get("path").and_then(Value::as_str).map(str::to_string);
+        let damaged = crate::cmd::file::Damage { media, slides: vec![] };
+        // As with an ordinary damaged-file open, Save must ask for a new name instead of
+        // replacing the original with the empty media or missing retained chart parts.
+        let path = if damaged.is_empty() { meta.get("path").and_then(Value::as_str).map(str::to_string) } else { None };
         let title = meta.get("title").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or("Presentation").to_string();
         // Take the entry over (so another instance starting now leaves it alone), keeping its
         // snapshot until this one writes a newer one.
@@ -228,6 +233,7 @@ pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
         st.saved_doc = std::sync::Arc::new((*st.doc).clone());
         st.revision += 1;
         opened.push(s.add_document(st));
+        crate::cmd::file::report_damage(s, &damaged)?;
     }
     remove_stale_locks(dir);
     Ok(opened)
