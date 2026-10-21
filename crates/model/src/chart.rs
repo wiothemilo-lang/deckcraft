@@ -447,6 +447,17 @@ pub struct ChartKept {
 }
 
 impl ChartKept {
+    /// Maximum retained package parts per chart, including relationship sidecars.
+    pub const MAX_PARTS: usize = 256;
+    /// Maximum direct relationships retained by one chart.
+    pub const MAX_RELS: usize = 1024;
+
+    /// Bound downstream work equally for native files, PPTX capture and programmatic models.
+    pub fn within_limits(&self) -> bool {
+        self.parts.len() <= Self::MAX_PARTS && self.rels.len() <= Self::MAX_RELS
+    }
+
+    /// Omit absent sidecars from ordinary chart JSON.
     fn is_empty(&self) -> bool {
         self.rels.is_empty() && self.parts.is_empty()
     }

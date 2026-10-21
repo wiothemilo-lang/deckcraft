@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: chart-local work limits and indexed retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -115,6 +115,7 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
 | 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-20 | trivial | Separated working round-trip features from the remaining workflow shortfalls; readiness scores unchanged |
 | 2026-10-20 | minor | Media playback options (#74), including full-screen video, round-trip through standard timing nodes. Core workflow and beta item 3 narrowed; overall estimates unchanged pending a new calibration |

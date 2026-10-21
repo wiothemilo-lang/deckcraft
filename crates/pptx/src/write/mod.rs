@@ -487,7 +487,34 @@ fn sanitized(p: &Presentation) -> std::borrow::Cow<'_, Presentation> {
     std::borrow::Cow::Owned(q)
 }
 
+/// Reject excessive retained chart graphs before cloning models or building the package.
+fn check_chart_limits(p: &Presentation) -> Result<(), PptxError> {
+    let masters = p.masters.iter().chain(p.notes_master.iter()).chain(p.handout_master.iter());
+    let roots = p
+        .slides
+        .iter()
+        .map(|s| s.shapes.as_slice())
+        .chain(masters.flat_map(|m| std::iter::once(m.shapes.as_slice()).chain(m.layouts.iter().map(|l| l.shapes.as_slice()))));
+    for root in roots {
+        let mut pending = vec![root];
+        while let Some(shapes) = pending.pop() {
+            for shape in shapes {
+                match &shape.kind {
+                    deckcraft_model::ShapeKind::Group { children, .. } => pending.push(children),
+                    deckcraft_model::ShapeKind::Chart(chart) if !chart.kept.within_limits() => {
+                        return Err(PptxError::Write("retained chart data exceeds per-chart limits".into()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build the presentation package after validating retained chart cardinality.
 pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
+    check_chart_limits(p)?;
     let p = sanitized(p);
     let p: &Presentation = &p;
     let mut x = Exp {

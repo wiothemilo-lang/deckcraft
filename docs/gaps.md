@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: chart-local work limits and indexed retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -378,6 +378,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
 | 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-21 | minor | Added opaque graph command regressions for cross-document paste and package checks for rejected import/export data; missing/unsupported/over-budget graphs and strict-save reporting remain |
 | 2026-10-21 | minor | Root hyperlinks no longer reject an intact opaque graph; nested relationship XML and failed decode attempts spend bounded import work before parsing |

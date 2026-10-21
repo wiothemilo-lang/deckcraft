@@ -408,7 +408,6 @@ fn text_color(e: Option<&El>) -> Option<deckcraft_model::ColorRef> {
     rec(e?, 0)
 }
 
-const MAX_KEPT_PARTS: usize = 256;
 const MAX_KEPT_DEPTH: usize = 8;
 
 /// Relationships and parts a chart points at, so a later save can write them back.
@@ -418,7 +417,11 @@ pub(crate) fn capture_kept(pkg: &crate::opc::Package, chart_part: &str) -> deckc
     let mut kept = ChartKept::default();
     // The chart document itself is rewritten; don't store a second copy of it.
     let mut seen = std::collections::HashMap::from([(crate::opc::norm(chart_part), true)]);
-    for r in pkg.rels(chart_part).items {
+    let rels = pkg.rels(chart_part);
+    if rels.items.len() > ChartKept::MAX_RELS {
+        log::warn!("pptx: chart relationships exceed the per-chart limit");
+    }
+    for r in rels.items.into_iter().take(ChartKept::MAX_RELS) {
         if !safe_rel(&r.id, &r.ty, &r.target_raw) {
             log::warn!("pptx: skipping chart relationship {}", r.id);
             continue;
@@ -446,9 +449,9 @@ fn copy_part(
     seen: &mut std::collections::HashMap<String, bool>,
     depth: usize,
 ) -> bool {
-    use deckcraft_model::chart::ChartPart;
+    use deckcraft_model::chart::{ChartKept, ChartPart};
 
-    if depth > MAX_KEPT_DEPTH || out.len() >= MAX_KEPT_PARTS {
+    if depth > MAX_KEPT_DEPTH || out.len() >= ChartKept::MAX_PARTS {
         log::warn!("pptx: chart part closure stopped at {part}");
         return false;
     }
@@ -472,14 +475,20 @@ fn copy_part(
         seen.insert(key, false);
         return false;
     }
+    let rels_name = crate::opc::rels_path(part);
+    let rels_bytes =
+        (crate::opc::sidecar_part(&rels_name) && seen.get(&crate::opc::norm(&rels_name)).is_none()).then(|| pkg.get(&rels_name)).flatten();
+    // Reserve the payload and its relationship sidecar together, so capture cannot
+    // produce a native file that exceeds the shared chart-local limit by one.
+    if out.len().saturating_add(if rels_bytes.is_some() { 2 } else { 1 }) > ChartKept::MAX_PARTS {
+        log::warn!("pptx: chart part closure stopped at {part}");
+        seen.insert(key, false);
+        return false;
+    }
     let content_type = pkg.content_type(part).unwrap_or_default();
     out.push(ChartPart { name, content_type, bytes: bytes.to_vec(), native_entry: None });
     seen.insert(key, true);
-    let rels_name = crate::opc::rels_path(part);
-    if crate::opc::sidecar_part(&rels_name)
-        && seen.get(&crate::opc::norm(&rels_name)).is_none()
-        && let Some(rels_bytes) = pkg.get(&rels_name)
-    {
+    if let Some(rels_bytes) = rels_bytes {
         seen.insert(crate::opc::norm(&rels_name), true);
         let name = pkg.original_name(&rels_name).unwrap_or(&rels_name).trim_start_matches('/').to_string();
         out.push(ChartPart {

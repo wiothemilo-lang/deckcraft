@@ -11,6 +11,7 @@ use crate::{FormatError, MAX_ENTRY, Result, read_entry_max};
 const PREFIX: &str = "chart-parts/";
 type Payload = (String, String, Vec<u8>);
 
+/// Move retained bytes into independently referenced native ZIP members.
 pub(super) fn separate(p: &mut Presentation) -> Result<Vec<Payload>> {
     let mut payloads = Vec::new();
     visit_parts(p, |part| {
@@ -24,6 +25,7 @@ pub(super) fn separate(p: &mut Presentation) -> Result<Vec<Payload>> {
     Ok(payloads)
 }
 
+/// Restore sidecars while charging the file-wide media budget and per-chart work limits.
 pub(super) fn restore(
     p: &mut Presentation,
     z: &mut zip::ZipArchive<Cursor<&[u8]>>,
@@ -70,6 +72,7 @@ pub(super) fn restore(
     })
 }
 
+/// Visit every chart owner, validating a chart before any of its payloads are processed.
 fn visit_parts(p: &mut Presentation, mut visit: impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
     // Use an explicit stack for groups. Charts can also live on masters and their layouts,
     // including the notes and handout masters; none of these owners may leak inline bytes.
@@ -85,6 +88,7 @@ fn visit_parts(p: &mut Presentation, mut visit: impl FnMut(&mut ChartPart) -> Re
     Ok(())
 }
 
+/// Include both a master's shapes and its layouts in the same validation pass.
 fn master_parts(master: &mut Master, visit: &mut impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
     shapes(&mut master.shapes, visit)?;
     for layout in &mut master.layouts {
@@ -93,6 +97,7 @@ fn master_parts(master: &mut Master, visit: &mut impl FnMut(&mut ChartPart) -> R
     Ok(())
 }
 
+/// Walk groups iteratively and reject excessive chart cardinality before reading bytes.
 fn shapes(root: &mut [Shape], visit: &mut impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
     let mut pending = vec![root];
     while let Some(shapes) = pending.pop() {
@@ -100,6 +105,13 @@ fn shapes(root: &mut [Shape], visit: &mut impl FnMut(&mut ChartPart) -> Result<(
             match &mut shape.kind {
                 ShapeKind::Group { children, .. } => pending.push(children),
                 ShapeKind::Chart(chart) => {
+                    if !chart.kept.within_limits() {
+                        return Err(FormatError::Damaged(format!(
+                            "retained chart data exceeds per-chart limits ({} parts, {} relationships)",
+                            deckcraft_model::chart::ChartKept::MAX_PARTS,
+                            deckcraft_model::chart::ChartKept::MAX_RELS,
+                        )));
+                    }
                     for part in &mut chart.kept.parts {
                         visit(part)?;
                     }

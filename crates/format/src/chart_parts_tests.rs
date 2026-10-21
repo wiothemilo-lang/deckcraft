@@ -1,5 +1,5 @@
 use super::*;
-use deckcraft_model::chart::{Chart, ChartPart, ChartRel, ChartType};
+use deckcraft_model::chart::{Chart, ChartKept, ChartPart, ChartRel, ChartType};
 use deckcraft_model::{Master, Shape, ShapeId};
 use serde_json::{Value, json};
 
@@ -254,4 +254,53 @@ fn legacy_container_keeps_chart_sidecars_and_flattened_axis_fields() {
     assert!(model_json.get("axis").is_none());
     assert_eq!(read_entry(&mut zip, "chart-parts/0").unwrap(), b"owned legacy chart bytes");
     assert_eq!(load(&bytes).unwrap(), p);
+}
+
+/// Forge the untrusted manifest directly, bypassing the native writer's validation.
+fn resize_kept(value: &mut Value, field: &str, count: usize) {
+    if let Some(kept) = value.get_mut("kept") {
+        let list = kept[field].as_array_mut().unwrap();
+        let mut item = list[0].clone();
+        if field == "parts" {
+            item.as_object_mut().unwrap().remove("nativeEntry");
+            item.as_object_mut().unwrap().remove("bytes");
+        }
+        list.resize(count, item);
+        return;
+    }
+    match value {
+        Value::Array(values) => values.iter_mut().for_each(|v| resize_kept(v, field, count)),
+        Value::Object(values) => values.values_mut().for_each(|v| resize_kept(v, field, count)),
+        _ => {}
+    }
+}
+
+/// Empty legacy payloads still consume the chart-local work budget, not just byte limits.
+#[test]
+fn native_chart_cardinality_is_bounded_even_without_payload_bytes() {
+    let bytes = save(&fixture(vec![])).unwrap();
+    for (field, limit) in [("parts", ChartKept::MAX_PARTS), ("rels", ChartKept::MAX_RELS)] {
+        let at_limit = rewrite_manifest(&bytes, |m| resize_kept(m, field, limit));
+        assert!(load(&at_limit).is_ok(), "valid boundary rejected for {field}");
+        let excessive = rewrite_manifest(&bytes, |m| resize_kept(m, field, limit + 1));
+        let error = load(&excessive).unwrap_err().to_string();
+        assert!(error.contains("per-chart limits"), "{field}: {error}");
+    }
+}
+
+/// Both native container names reject an oversized programmatic sidecar before writing it.
+#[test]
+fn native_save_rejects_excessive_chart_sidecars() {
+    for field in ["parts", "rels"] {
+        let mut p = fixture(vec![]);
+        let ShapeKind::Group { children, .. } = &mut Arc::make_mut(&mut p.slides[0]).shapes[0].kind else { panic!("group") };
+        let ShapeKind::Chart(chart) = &mut children[0].kind else { panic!("chart") };
+        if field == "parts" {
+            chart.kept.parts.resize(ChartKept::MAX_PARTS + 1, chart.kept.parts[0].clone());
+        } else {
+            chart.kept.rels.resize(ChartKept::MAX_RELS + 1, chart.kept.rels[0].clone());
+        }
+        assert!(save(&p).unwrap_err().to_string().contains("per-chart limits"));
+        assert!(save_legacy(&p).unwrap_err().to_string().contains("per-chart limits"));
+    }
 }

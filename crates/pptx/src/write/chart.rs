@@ -725,6 +725,12 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
     if c.kept.rels.is_empty() {
         return;
     }
+    // Index once: scanning all parts for every absent relationship sidecar is quadratic.
+    // Keep the first normalized spelling, matching the payload deduplication below.
+    let mut parts = HashMap::new();
+    for part in &c.kept.parts {
+        parts.entry(norm(&part.name)).or_insert(part);
+    }
     // Original part name (normalized) → the name written.
     let mut names: HashMap<String, String> = HashMap::new();
     for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
@@ -754,7 +760,7 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
     for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
         let Some(new_source) = names.get(&norm(&p.name)) else { continue };
         let rp = norm(&rels_path(&p.name));
-        let Some(rels_part) = c.kept.parts.iter().find(|q| norm(&q.name) == rp) else { continue };
+        let Some(rels_part) = parts.get(&rp) else { continue };
         let mut out = RelsOut::default();
         for r in crate::opc::rels_from_bytes(&rels_part.bytes, &p.name).items {
             if r.external {
