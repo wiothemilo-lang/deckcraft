@@ -1,0 +1,77 @@
+name: Windows portable fork
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/portable-windows.yml
+      - packaging/windows/portable/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Windows x64 portable
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      # Match package.ps1: target-only static CRT, no VC++ redistributable installer.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out openly licensed fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+          path: craft-fonts
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Build native release executable
+        run: cargo build --locked --release -p deckcraft --target x86_64-pc-windows-msvc
+      - name: Assemble and smoke-test portable bundle
+        shell: pwsh
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:RUNNER_TEMP 'DeckCraft-Fork'
+          New-Item -ItemType Directory -Path $bundle | Out-Null
+          Copy-Item -LiteralPath target/x86_64-pc-windows-msvc/release/deckcraft.exe -Destination (Join-Path $bundle 'DeckCraft-Fork.exe')
+          Get-ChildItem packaging/windows/portable -File | Copy-Item -Destination $bundle
+          foreach ($file in @('LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'ATTRIBUTION.md')) {
+            Copy-Item -LiteralPath $file -Destination $bundle
+          }
+          @{
+            repository = $env:SOURCE_REPOSITORY
+            commit = $env:GITHUB_SHA
+            run = "$env:GITHUB_SERVER_URL/$env:SOURCE_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'BUILD-INFO.json') -Encoding utf8
+          # Test the packaged EXE, without Rust/Cargo on PATH. No GUI needed for these flags.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          foreach ($flag in @('--version', '--help')) {
+            $process = Start-Process -FilePath (Join-Path $bundle 'DeckCraft-Fork.exe') -ArgumentList $flag -PassThru
+            if (!$process.WaitForExit(15000)) {
+              $process.Kill()
+              throw "Portable executable timed out for $flag"
+            }
+            if ($process.ExitCode -ne 0) { throw "Portable executable failed for $flag ($($process.ExitCode))" }
+          }
+          $zip = Join-Path $env:RUNNER_TEMP 'DeckCraft-Fork-Windows-x64.zip'
+          Compress-Archive -Path $bundle -DestinationPath $zip
+          (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash | Set-Content "$zip.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: DeckCraft-Fork-Windows-x64
+          path: |
+            ${{ runner.temp }}/DeckCraft-Fork-Windows-x64.zip
+            ${{ runner.temp }}/DeckCraft-Fork-Windows-x64.zip.sha256
+          retention-days: 14
+          if-no-files-found: error
