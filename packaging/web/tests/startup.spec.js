@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 const routes = [
   ['sample', '/'],
@@ -39,7 +40,10 @@ for (const [name, route] of routes) {
         expect(log.some(line => /wgpu backend Gl\b/.test(line)), log.join('\n')).toBe(true);
       }
     } finally {
-      await testInfo.attach('browser-console', { body: log.concat(errors).join('\n'), contentType: 'text/plain' });
+      const consolePath = testInfo.outputPath('browser-console.txt');
+      await mkdir(testInfo.outputDir, { recursive: true });
+      await writeFile(consolePath, log.concat(errors).join('\n'), 'utf8');
+      await testInfo.attach('browser-console', { path: consolePath, contentType: 'text/plain' });
       if (!page.isClosed()) await page.screenshot({ path: testInfo.outputPath('startup.png') });
     }
   });
