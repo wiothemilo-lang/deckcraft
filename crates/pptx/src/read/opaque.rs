@@ -11,6 +11,8 @@ use crate::xml::El;
 const MAX_PARTS: usize = 256;
 const MAX_RELS: usize = 1024;
 const MAX_TOTAL_RELS: usize = 16_384;
+const MAX_RELS_XML_BYTES: usize = 1 << 20;
+const MAX_TOTAL_RELS_XML_BYTES: usize = 16 << 20;
 const MAX_DEPTH: usize = 8;
 const MAX_BYTES: usize = 64 << 20;
 
@@ -38,7 +40,14 @@ pub(super) fn capture(imp: &mut Imp, part: &Part, el: &El) -> (Parts, Vec<Opaque
     let mut seen_rels = HashSet::new();
     let mut budget = Budget::default();
     for id in super::rel_refs(el).into_iter().take(MAX_RELS) {
-        let Some(rel) = part.rels.get(&id).filter(|r| !r.external) else { continue };
+        let Some(rel) = part.rels.get(&id) else { continue };
+        if !spend_visit(imp, &mut budget) || !safe_word(&rel.id) || !safe_word(&rel.ty) || !safe_word(&rel.target_raw) {
+            continue;
+        }
+        if rel.external {
+            parts.push((id, rel.ty.clone(), imp.media_link(&rel.target_raw)));
+            continue;
+        }
         let checkpoint = imp.media.len();
         let mut closure = Closure::default();
         if let Some(media) = copy_part(imp, &rel.target, rel.kind == "diagramData", &mut closure, &mut budget, 0) {
@@ -120,6 +129,34 @@ fn safe_word(s: &str) -> bool {
     !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control)
 }
 
+/// Charge attempted work before parsing or validation, so failures cannot renew the budget.
+fn spend_visit(imp: &mut Imp, budget: &mut Budget) -> bool {
+    if budget.rels >= MAX_RELS || imp.opaque_rels_read >= MAX_TOTAL_RELS {
+        return false;
+    }
+    budget.rels += 1;
+    imp.opaque_rels_read += 1;
+    true
+}
+
+/// Bound relationship XML before Package::rels can build a tree or materialize its entries.
+/// Repeated failed decodes spend import-wide bytes as well as visits; no media is allocated yet.
+fn read_rels(imp: &mut Imp, part: &str, budget: &mut Budget) -> Option<crate::opc::Rels> {
+    let path = crate::opc::rels_path(part);
+    let Some(bytes) = imp.pkg.get(&path) else { return Some(crate::opc::Rels::default()) };
+    let size = bytes.len();
+    if !spend_visit(imp, budget) || size > MAX_RELS_XML_BYTES || size > MAX_BYTES.saturating_sub(budget.bytes) {
+        return None;
+    }
+    if size > MAX_TOTAL_RELS_XML_BYTES.saturating_sub(imp.opaque_rels_xml_read) {
+        imp.opaque_rels_xml_read = MAX_TOTAL_RELS_XML_BYTES;
+        return None;
+    }
+    imp.opaque_rels_xml_read += size;
+    budget.bytes += size;
+    Some(imp.pkg.rels(part))
+}
+
 /// Follow data/media sidecars, not the presentation's slide/master graph.
 fn child_part(part: &str) -> bool {
     if crate::opc::sidecar_part(part) {
@@ -145,22 +182,15 @@ fn copy_part(imp: &mut Imp, part: &str, diagram: bool, closure: &mut Closure, bu
     }
     budget.parts += 1;
     budget.bytes += size;
+    let nested = read_rels(imp, part, budget)?;
     let media = if diagram { diagram_data(imp, part)? } else { imp.media_for(part)? };
     // Register before descending: a cycle reuses this id and never recurses forever.
     closure.seen.insert(key, media);
     let mut ids = HashSet::new();
-    for rel in imp.pkg.rels(part).items {
-        if budget.rels >= MAX_RELS
-            || imp.opaque_rels_read >= MAX_TOTAL_RELS
-            || !safe_word(&rel.id)
-            || !safe_word(&rel.ty)
-            || !safe_word(&rel.target_raw)
-            || !ids.insert(rel.id.clone())
-        {
+    for rel in nested.items {
+        if !spend_visit(imp, budget) || !safe_word(&rel.id) || !safe_word(&rel.ty) || !safe_word(&rel.target_raw) || !ids.insert(rel.id.clone()) {
             return None;
         }
-        budget.rels += 1;
-        imp.opaque_rels_read += 1;
         let target = if rel.external {
             // Preserve the address as data; nothing here opens a URL or a local file.
             imp.media_link(&rel.target_raw)

@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque graph clipboard identity and rejection cleanup covered; SmartArt remains partial and weighted breadth is unchanged).
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque root links and relationship decode work bounds covered; SmartArt remains partial and weighted breadth is unchanged).
 
 > **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -241,6 +241,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-21 | minor | SmartArt stays P after covering opaque graph identity through clipboard commands and cleanup of rejected graph data; breadth and aggregate scores unchanged |
+| 2026-10-21 | minor | SmartArt remains P after retaining opaque root hyperlinks and bounding nested relationship decoding before allocation; breadth unchanged |
 | 2026-10-20 | minor | SmartArt remains P after preserving bounded nested relationships on the opaque path (#203 partial); rendering/editing breadth and aggregate scores unchanged |
 | 2026-10-20 | minor | Comments row stays D after fixing malformed namespace output (#974); namespace-aware checks cover save/reopen/save, with breadth unchanged |
 | 2026-10-20 | minor | Media option row stays D with PPTX playback settings now preserved (#74), including video full screen; breadth unchanged |

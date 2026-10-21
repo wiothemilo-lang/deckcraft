@@ -361,3 +361,74 @@ fn cross_document_paste_remaps_opaque_graphs_for_shapes_and_slides() {
         assert_kept(&deckcraft_pptx::export(&pasted).expect("export pasted graph"));
     }
 }
+
+/// A hyperlink on the opaque frame itself must keep its root id alongside the embedded graph.
+#[test]
+fn an_external_root_hyperlink_keeps_the_live_diagram() {
+    const ROOT_LINK: &str = "https://example.invalid/diagram-root";
+    let mut files = entries(&fixture());
+    let (_, slide) = files.iter_mut().find(|(name, _)| name == "ppt/slides/slide1.xml").expect("slide");
+    let xml = String::from_utf8(slide.clone()).expect("slide XML");
+    let marker = r#"<p:cNvPr id="90" name="Owned diagram"/>"#;
+    assert!(xml.contains(marker));
+    *slide = xml.replace(marker, r#"<p:cNvPr id="90" name="Owned diagram"><a:hlinkClick r:id="rIdRootLink"/></p:cNvPr>"#).into_bytes();
+    append_xml(
+        &mut files,
+        "ppt/slides/_rels/slide1.xml.rels",
+        "</Relationships>",
+        &format!(r#"<Relationship Id="rIdRootLink" Type="{RT}hyperlink" Target="{ROOT_LINK}" TargetMode="External"/>"#),
+    );
+    let mut doc = deckcraft_pptx::import(&package(&files)).expect("import root hyperlink");
+    for _ in 0..2 {
+        let saved = deckcraft_pptx::export(&doc).expect("export root hyperlink");
+        assert_kept(&saved);
+        let files = entries(&saved);
+        let (_, slide) = files.iter().find(|(n, _)| n == "ppt/slides/slide1.xml").expect("slide");
+        let slide = deckcraft_pptx::parse_xml(slide).expect("slide XML");
+        let id = slide.root.find("hlinkClick").expect("root click").attr("r:id").expect("root id");
+        let (_, rels) = files.iter().find(|(n, _)| n == "ppt/slides/_rels/slide1.xml.rels").expect("slide rels");
+        let rels = deckcraft_pptx::parse_xml(rels).expect("slide relationships");
+        let link = rels.root.elements().find(|r| r.attr("Id") == Some(id)).expect("root relationship");
+        assert_eq!(link.attr("Target"), Some(ROOT_LINK));
+        assert_eq!(link.attr("TargetMode"), Some("External"));
+        assert_eq!(link.attr("Type"), Some(format!("{RT}hyperlink").as_str()));
+        doc = deckcraft_pptx::import(&saved).expect("reopen root hyperlink");
+    }
+}
+
+/// Oversized relationship XML is rejected before its tree or relationship vector is decoded.
+#[test]
+fn oversized_nested_relationship_xml_uses_the_safe_fallback() {
+    let mut files = entries(&fixture());
+    append_xml(&mut files, "ppt/diagrams/_rels/data1.xml.rels", "</Relationships>", &" ".repeat(1 << 20));
+    assert_fallback(&package(&files));
+}
+
+/// Repeated failures in a large shared child's rels cannot restart decoding indefinitely.
+/// Once the import budget is spent, even a subsequent intact graph uses the safe fallback.
+#[test]
+fn repeated_failed_relationship_decodes_spend_the_import_budget() {
+    let mut files = entries(&fixture());
+    let (_, slide) = files.iter().find(|(n, _)| n == "ppt/slides/slide1.xml").expect("slide");
+    let slide = deckcraft_pptx::parse_xml(slide).expect("slide XML");
+    let frame = slide.root.find("graphicFrame").expect("frame").to_xml().replace("rIdDm", "rIdBad");
+    append_xml(&mut files, "ppt/slides/slide1.xml", "<p:graphicFrame>", &frame.repeat(17));
+    append_xml(
+        &mut files,
+        "ppt/slides/_rels/slide1.xml.rels",
+        "</Relationships>",
+        &format!(r#"<Relationship Id="rIdBad" Type="{RT}diagramData" Target="../diagrams/rejected.xml"/>"#),
+    );
+    files.push(("ppt/diagrams/rejected.xml".into(), DATA.as_bytes().to_vec()));
+    files.push(("ppt/diagrams/_rels/rejected.xml.rels".into(), format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdImage" Type="{RT}image" Target="../media/rejected.png"/></Relationships>"#).into_bytes()));
+    files.push(("ppt/media/rejected.png".into(), png()));
+    let invalid = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="bad" Type="{}" Target="{LINK}" TargetMode="External"/>
+</Relationships>"#,
+        "x".repeat(4097)
+    );
+    let padded = invalid.replace("</Relationships>", &format!("{}</Relationships>", " ".repeat((1 << 20) - invalid.len())));
+    assert_eq!(padded.len(), 1 << 20, "file fits the per-file bound but spends import decoding work");
+    files.push(("ppt/media/_rels/rejected.png.rels".into(), padded.into_bytes()));
+    assert_fallback(&package(&files));
+}
