@@ -16,4 +16,12 @@ $shortcut.IconLocation = "$binary,0"
 $shortcut.Description = 'DeckCraft fork - portable build, no Rust required'
 $shortcut.WindowStyle = 7
 $shortcut.Save()
-Write-Host 'Created DeckCraft Fork on the Desktop. Keep this portable folder in place.'
+$update = $shell.CreateShortcut((Join-Path $desktop 'DeckCraft Fork - Update.lnk'))
+$update.TargetPath = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$update.Arguments = '/d /s /c ""{0}""' -f (Join-Path $PSScriptRoot 'Update-DeckCraft.cmd')
+$update.WorkingDirectory = $env:TEMP
+$update.IconLocation = "$binary,0"
+$update.Description = 'Download a tested Windows build from wiothemilo-lang/deckcraft'
+$update.WindowStyle = 7
+$update.Save()
+Write-Host 'Created DeckCraft Fork and DeckCraft Fork - Update on the Desktop.'
