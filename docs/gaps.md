@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -33,6 +33,10 @@ revision history.
 | 14 | Slides rasterize on the CPU; no performance baseline | Performance / hardware | | 15–30 | [hardware-parity.md](hardware-parity.md) |
 
 ## Stability
+
+Web startup #959 is covered by a platform-specific document-ID fix and the actual Chromium
+startup smoke in `.github/workflows/web-smoke.yml`; WASM compilation alone is insufficient.
+Other browser/driver combinations and hardware WebGPU still need runtime coverage.
 
 ### Close discards an edited presentation without asking (#60)
 - **Evidence:** issue #60; quitting prompts, `file.close` doesn't. PR #75 is open.
@@ -378,6 +382,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
 | 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |

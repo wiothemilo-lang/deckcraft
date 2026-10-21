@@ -1,10 +1,15 @@
 # Hardware parity with PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (community PR wave 2026-10-14: picture export DPI, Retina pixel grid (#184), twist to rotate, swipe to turn the page, pen pressure; duplicated rows and headers folded; previous: minor, IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
 
 What hardware PowerPoint uses and what DeckCraft uses, per platform. Dimension score: **~40%
 ready** (estimated), **25–45 h** to parity. Performance (unmeasured, ~55%) is tracked here too
 because it mostly follows from hardware use.
+
+Browser startup (#959) avoids native PID/wall-clock APIs when creating document IDs. The
+`Web startup` CI opens the actual app on sample/blank and forced WebGL routes in Chromium
+using software rendering; hardware WebGPU and other browser/driver combinations remain
+unverified by this smoke test.
 
 ## Graphics and rendering
 
@@ -73,6 +78,7 @@ outlines every frame (#67, fix open), and the decoders run in software.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-14 | minor | PNG and JPEG slide export record 144 dpi at the default 2 pixels per point, so a Retina picture opens at the slide's size |
 | 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-14 | trivial | Community PR wave folded: one row each for pinch/two-finger gestures and pen pressure |

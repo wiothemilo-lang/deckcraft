@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -115,6 +115,7 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
 | 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |

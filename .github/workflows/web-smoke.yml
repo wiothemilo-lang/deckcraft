@@ -1,0 +1,101 @@
+name: Web startup
+
+on:
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - apps/deckcraft-web/**
+      - packaging/web/**
+      - .github/workflows/web-smoke.yml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**
+      - apps/deckcraft-web/**
+      - packaging/web/**
+      - .github/workflows/web-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-startup-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Chromium startup (WASM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out openly licensed fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          repository: storytold/craft-fonts
+          ref: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+          path: craft-fonts
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: web-startup
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: packaging/web/tests/package-lock.json
+      - name: Install browser tests
+        working-directory: packaging/web/tests
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - name: Install checksum-verified Trunk
+        env:
+          TRUNK_VERSION: '0.22.0'
+          TRUNK_SHA256: f78c1989240c56592d8cfc4df5cc27399a3ff66a3f9cc819e16f1e3d809ce7c2
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 120 \
+            "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            --output "$RUNNER_TEMP/trunk.tar.gz"
+          echo "$TRUNK_SHA256  $RUNNER_TEMP/trunk.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/web-tools"
+          tar -xzf "$RUNNER_TEMP/trunk.tar.gz" -C "$RUNNER_TEMP/web-tools" trunk
+          echo "$RUNNER_TEMP/web-tools" >> "$GITHUB_PATH"
+      - name: Build the actual web app
+        working-directory: apps/deckcraft-web
+        run: trunk build --release --locked
+      - name: Include package notices
+        run: cp LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md dist/web/
+      - name: Start sample and blank documents in Chromium and WebGL
+        working-directory: packaging/web/tests
+        run: npm test
+      - name: Keep browser diagnostics briefly
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-startup-results
+          path: packaging/web/tests/test-results/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Keep the built site for verification
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-startup-site
+          path: dist/web/
+          if-no-files-found: ignore
+          retention-days: 3
