@@ -14,7 +14,7 @@ mod chart_parts_tests;
 #[cfg(test)]
 mod legacy_tests;
 
-use std::io::{Cursor, Read, Write};
+use std::io::{BufWriter, Cursor, Read, Write};
 use std::sync::Arc;
 
 use deckcraft_model::text::{Paragraph, TextBody};
@@ -40,7 +40,7 @@ const MAX_TOTAL_MEDIA: u64 = 4 << 30;
 /// Media items and chart sidecar parts one file may list.
 const MAX_MEDIA_ITEMS: usize = 100_000;
 
-/// What one load may inflate.
+/// Combined payload limits shared by native saving and loading.
 #[derive(Clone, Copy)]
 struct Budget {
     total: u64,
@@ -80,7 +80,35 @@ pub fn save_legacy(p: &Presentation) -> Result<Vec<u8>> {
     save_as(p, LEGACY_MIMETYPE, LEGACY_FORMAT_NAME)
 }
 
+/// Save with the same entry and combined payload limits used when reopening the file.
 fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8>> {
+    save_within(p, mimetype, format_name, Budget { total: MAX_TOTAL_MEDIA, items: MAX_MEDIA_ITEMS }, MAX_ENTRY)
+}
+
+/// Limit the manifest's inflated size while streaming JSON directly into its ZIP entry.
+struct LimitedEntry<'a, W> {
+    inner: &'a mut W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for LimitedEntry<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other("presentation.json exceeds the entry limit"));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining = self.remaining.saturating_sub(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// The production serializer with injectable limits for small boundary regressions.
+fn save_within(p: &Presentation, mimetype: &str, format_name: &str, budget: Budget, max_entry: u64) -> Result<Vec<u8>> {
+    chart_parts::preflight(p, budget, max_entry)?;
     let mut buf = Cursor::new(Vec::new());
     {
         let mut z = zip::ZipWriter::new(&mut buf);
@@ -93,9 +121,12 @@ fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8
         let parts = chart_parts::separate(&mut presentation)?;
         let m =
             Manifest { format: format_name.into(), version: VERSION, generator: format!("DeckCraft {}", env!("CARGO_PKG_VERSION")), presentation };
-        let json = serde_json::to_vec(&finite::Finite(&m)).map_err(|e| FormatError::Write(e.to_string()))?;
         z.start_file("presentation.json", deflate).map_err(w)?;
-        z.write_all(&json).map_err(|e| FormatError::Write(e.to_string()))?;
+        {
+            let mut json = BufWriter::new(LimitedEntry { inner: &mut z, remaining: max_entry });
+            serde_json::to_writer(&mut json, &finite::Finite(&m)).map_err(|e| FormatError::Write(e.to_string()))?;
+            json.flush().map_err(|e| FormatError::Write(e.to_string()))?;
+        }
         for item in &p.media {
             if item.link.is_some() && item.data.is_empty() {
                 continue;

@@ -307,3 +307,69 @@ fn native_save_rejects_excessive_chart_sidecars() {
         assert!(save_legacy(&p).unwrap_err().to_string().contains("per-chart limits"));
     }
 }
+
+/// Saving and reopening spend the same combined byte/item budget across all chart owners.
+#[test]
+fn native_save_and_load_share_aggregate_payload_limits() {
+    let mut p = fixture(vec![7; 6]);
+    p.add_media("owned.bin", "application/octet-stream", vec![8; 5]).unwrap();
+    for (mimetype, format) in [(MIMETYPE, FORMAT_NAME), (LEGACY_MIMETYPE, LEGACY_FORMAT_NAME)] {
+        let budget = Budget { total: 11, items: 2 };
+        let bytes = save_within(&p, mimetype, format, budget, MAX_ENTRY).unwrap();
+        assert_eq!(load_within(&bytes, budget).unwrap().0, p);
+        assert!(save_within(&p, mimetype, format, Budget { total: 10, items: 2 }, MAX_ENTRY).unwrap_err().to_string().contains("byte limit"));
+        assert!(save_within(&p, mimetype, format, Budget { total: 11, items: 1 }, MAX_ENTRY).unwrap_err().to_string().contains("item limit"));
+    }
+
+    // Every chart is individually permitted; only their combined count/bytes cross the limit.
+    let shapes = p.slides[0].shapes.clone();
+    let master = Arc::make_mut(&mut p.masters[0]);
+    master.shapes = shapes.clone();
+    master.layouts[0].shapes = shapes.clone();
+    p.notes_master = Some(Arc::new(Master { shapes: shapes.clone(), ..Default::default() }));
+    p.handout_master = Some(Arc::new(Master { shapes, ..Default::default() }));
+    let budget = Budget { total: 35, items: 6 };
+    let bytes = save_within(&p, MIMETYPE, FORMAT_NAME, budget, MAX_ENTRY).unwrap();
+    assert_eq!(load_within(&bytes, budget).unwrap().0, p);
+    assert!(save_within(&p, MIMETYPE, FORMAT_NAME, Budget { total: 34, items: 6 }, MAX_ENTRY).is_err());
+    assert!(save_within(&p, MIMETYPE, FORMAT_NAME, Budget { total: 35, items: 5 }, MAX_ENTRY).is_err());
+}
+
+/// Individual payload and manifest limits are exercised without allocating multi-GiB fixtures.
+#[test]
+fn native_save_limits_each_payload_and_the_streamed_manifest() {
+    let empty = fixture(vec![]);
+    let bytes = save(&empty).unwrap();
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+    let manifest_size = read_entry(&mut zip, "presentation.json").unwrap().len() as u64;
+    let budget = Budget { total: manifest_size + 1025, items: 2 };
+    let at_limit = save_within(&empty, MIMETYPE, FORMAT_NAME, budget, manifest_size).unwrap();
+    assert_eq!(load(&at_limit).unwrap(), empty);
+    let error = save_within(&empty, MIMETYPE, FORMAT_NAME, budget, manifest_size - 1).unwrap_err().to_string();
+    assert!(error.contains("presentation.json"), "{error}");
+
+    let limit = manifest_size + 1024;
+    let at_limit = fixture(vec![7; limit as usize]);
+    let bytes = save_within(&at_limit, MIMETYPE, FORMAT_NAME, budget, limit).unwrap();
+    assert_eq!(load(&bytes).unwrap(), at_limit);
+    let excessive_chart = fixture(vec![7; limit as usize + 1]);
+    let error = save_within(&excessive_chart, MIMETYPE, FORMAT_NAME, budget, limit).unwrap_err().to_string();
+    assert!(error.contains("entry limit"));
+    let mut excessive_media = empty;
+    excessive_media.add_media("owned.bin", "application/octet-stream", vec![8; limit as usize + 1]).unwrap();
+    let error = save_within(&excessive_media, MIMETYPE, FORMAT_NAME, budget, limit).unwrap_err().to_string();
+    assert!(error.contains("entry limit"));
+}
+
+/// Linked-only media consumes an item even though no payload member is stored.
+#[test]
+fn native_save_counts_linked_only_media_items() {
+    let mut p = fixture(vec![]);
+    let id = p.add_media("owned.bin", "application/octet-stream", vec![]).unwrap();
+    let media = p.media.iter_mut().find(|m| m.id == id).unwrap();
+    media.link = Some("https://example.invalid/owned.bin".into());
+    let budget = Budget { total: 0, items: 2 };
+    let bytes = save_within(&p, MIMETYPE, FORMAT_NAME, budget, MAX_ENTRY).unwrap();
+    assert_eq!(load_within(&bytes, budget).unwrap().0, p);
+    assert!(save_within(&p, MIMETYPE, FORMAT_NAME, Budget { total: 0, items: 1 }, MAX_ENTRY).is_err());
+}

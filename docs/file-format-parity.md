@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: chart-local work limits and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -15,6 +15,12 @@ models explicitly. PPTX capture applies the same cardinality limits; the exporte
 normalized companion names once and rewrites each unique payload's relationships once before
 ZIP buffering. Duplicate normalized names keep their first entry. This does not add chart editing
 or new workbook generation.
+
+Native save also preflights the same 100,000 combined media/chart items, 4 GiB combined
+payload bytes and 2 GiB per-entry limits as the reader, including linked-only item counts.
+Manifest JSON is streamed through a bounded writer; no second full JSON byte buffer is needed.
+Boundary tests use reduced budgets, and an engine regression preserves the last readable
+recovery checkpoint on serializer refusal or oversized encoded snapshot/metadata. This does not establish a cause or resolution for #1092.
 
 ## Documents
 
@@ -129,6 +135,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
 | 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
 | 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |

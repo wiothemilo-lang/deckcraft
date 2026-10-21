@@ -6,10 +6,58 @@ use std::sync::Arc;
 use deckcraft_model::chart::ChartPart;
 use deckcraft_model::{Master, Presentation, Shape, ShapeKind};
 
-use crate::{FormatError, MAX_ENTRY, Result, read_entry_max};
+use crate::{Budget, FormatError, MAX_ENTRY, Result, read_entry_max};
 
 const PREFIX: &str = "chart-parts/";
 type Payload = (String, String, Vec<u8>);
+
+/// Refuse saves the reader cannot reopen before cloning chart bytes or constructing an archive.
+pub(super) fn preflight(p: &Presentation, budget: Budget, max_entry: u64) -> Result<()> {
+    let mut items = 0usize;
+    let mut left = budget.total;
+    let mut charge = |bytes: &[u8]| {
+        if items >= budget.items {
+            return Err(FormatError::Write("media and chart parts exceed the combined item limit".into()));
+        }
+        items += 1;
+        let size = bytes.len() as u64;
+        if size > max_entry {
+            return Err(FormatError::Write("embedded media or chart part exceeds the entry limit".into()));
+        }
+        left = left.checked_sub(size).ok_or_else(|| FormatError::Write("media and chart parts exceed the combined byte limit".into()))?;
+        Ok(())
+    };
+    // The manifest lists linked-only and repeated media items too; the reader counts all of them.
+    for media in &p.media {
+        charge(&media.data)?;
+    }
+    let masters = p.masters.iter().chain(p.notes_master.iter()).chain(p.handout_master.iter());
+    let roots = p
+        .slides
+        .iter()
+        .map(|s| s.shapes.as_slice())
+        .chain(masters.flat_map(|m| std::iter::once(m.shapes.as_slice()).chain(m.layouts.iter().map(|l| l.shapes.as_slice()))));
+    for root in roots {
+        let mut pending = vec![root];
+        while let Some(shapes) = pending.pop() {
+            for shape in shapes {
+                match &shape.kind {
+                    ShapeKind::Group { children, .. } => pending.push(children),
+                    ShapeKind::Chart(chart) => {
+                        if !chart.kept.within_limits() {
+                            return Err(FormatError::Write("retained chart data exceeds per-chart limits".into()));
+                        }
+                        for part in &chart.kept.parts {
+                            charge(&part.bytes)?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Move retained bytes into independently referenced native ZIP members.
 pub(super) fn separate(p: &mut Presentation) -> Result<Vec<Payload>> {

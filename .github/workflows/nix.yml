@@ -19,5 +19,5 @@ concurrency:
 
 jobs:
   nix:
-    # Intentionally tracked at @main (not SHA-pinned) so org-wide CI improvements, security fixes, and build optimizations propagate without PR churn across all craftapp repos.
-    uses: storytold/craft-common-actions/.github/workflows/nix.yml@main
+    # Reviewed shared workflow revision; updates are explicit and pass this fork's CI.
+    uses: storytold/craft-common-actions/.github/workflows/nix.yml@9824a77554c3e2c3b9e1094e97395fd23ab71624
