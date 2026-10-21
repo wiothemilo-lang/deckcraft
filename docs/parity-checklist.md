@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; #1092 investigation remains open; readiness scores unchanged)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint metadata precedes document replacement; #1092 investigation remains open; readiness scores unchanged)
 
 > **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -240,7 +240,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Recovery now keeps damage warnings for missing media/chart sidecars and opens a repaired copy without an implicit save destination. Synthetic save/error/checkpoint coverage added; #1092 remains unresolved pending incident evidence; readiness scores unchanged |
+| 2026-10-21 | minor | Recovery retains missing-part warnings and opens repaired copies without an implicit save destination. Checkpoint destination metadata is replaced before re-encoding document bytes; fault tests preserve the previous snapshot and repaired-copy policy across restart. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | SmartArt stays P after covering opaque graph identity through clipboard commands and cleanup of rejected graph data; breadth and aggregate scores unchanged |
 | 2026-10-21 | minor | SmartArt remains P after retaining opaque root hyperlinks and bounding nested relationship decoding before allocation; breadth unchanged |
 | 2026-10-20 | minor | SmartArt remains P after preserving bounded nested relationships on the opaque path (#203 partial); rendering/editing breadth and aggregate scores unchanged |

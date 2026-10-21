@@ -280,6 +280,27 @@ fn damaged_recovery_snapshots_cannot_silently_overwrite_the_original() {
         assert_eq!(std::fs::read(&snapshot).unwrap(), damaged, "asking for a path retains recovery");
         assert_eq!(meta_of(&dir, uid)["path"], json!(original.to_string_lossy()), "opening keeps the original metadata for triage");
 
+        // Refuse each checkpoint replacement in turn. A failure must not pair a newly
+        // normalized (empty but readable) member with the old implicit save destination.
+        for member in ["json", "deckcraft"] {
+            let blocked = dir.join(format!("{uid}.{member}.tmp"));
+            std::fs::create_dir(&blocked).unwrap();
+            assert!(next.execute("file.recovery.save", &json!({})).is_err());
+            std::fs::remove_dir(&blocked).unwrap();
+            assert_eq!(std::fs::read(&snapshot).unwrap(), damaged, "failed {member} write retains the previous snapshot");
+            assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+            if member == "deckcraft" {
+                assert!(meta_of(&dir, uid)["path"].is_null(), "destination policy is committed before document replacement");
+            }
+            let mut retry = Session::new();
+            retry.recovery_dir = Some(dir.clone());
+            retry.execute("file.recovery.open", &json!({})).unwrap();
+            assert!(retry.doc().unwrap().path.is_none(), "a restart after failed {member} write cannot regain the original destination");
+            assert!(retry.doc().unwrap().is_dirty());
+            assert_eq!(retry.execute("file.save", &json!({})).unwrap(), json!({"needsPath": true}));
+            assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+        }
+
         let copy = root.join("repaired-copy.deckcraft");
         next.execute("file.saveAs", &json!({"path": copy.to_string_lossy()})).unwrap();
         assert_eq!(deckcraft_format::load(&std::fs::read(copy).unwrap()).unwrap().slides.len(), 2);

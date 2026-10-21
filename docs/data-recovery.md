@@ -42,7 +42,8 @@ contributor-generated or have provable permitted provenance under [AGENTS.md](..
 `crates/engine/src/cmd/recovery_tests.rs` covers missing media and missing chart sidecars in small
 contributor-generated checkpoints. It checks the warning, repaired/unsaved state, a Save As
 request on ordinary Save, byte-for-byte preservation of the original and checkpoint during open
-and path selection, and explicit saving of the repaired copy.
+and path selection, and explicit saving of the repaired copy. Refused metadata and document
+checkpoint writes also retain the previous snapshot; a restart must still require a save location.
 
 A separate bounded workflow saves 18 slides repeatedly in both native and PPTX formats, checks
 each reopen, adds unsaved slide 19, and exercises missing/invalid video input plus a failed Save As.
@@ -57,7 +58,10 @@ a desktop-package build. Both run on GitHub; a browser startup check continues t
 
 Manual saves use an exclusively created temporary sibling, flush it with `sync_all`, rename it
 over the destination and only then mark the document saved. Recovery's document and metadata
-remain separate replacements, not a transaction across both files. Sudden power-loss durability,
+remain separate replacements, not a transaction across both files. The save destination metadata
+is committed first: a failed metadata write cannot leave a re-encoded partial snapshot paired with
+the old destination. If the document replacement fails instead, the previous snapshot remains
+readable with the more conservative destination policy. Sudden power-loss durability,
 real incident media/decoder behavior and the reported corrupt PPTX still require investigation
 with evidence. The tests do not certify those cases.
 
@@ -65,4 +69,4 @@ with evidence. The tests do not certify those cases.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-21 | minor | Record the unresolved #1092 report, preserve-evidence procedure and checked recovery policy; document bounded regressions and their limits |
+| 2026-10-21 | minor | Record the unresolved #1092 report, preserve-evidence procedure and checked recovery policy; destination metadata precedes document replacement, with restart tests for failed writes and explicit durability limits |

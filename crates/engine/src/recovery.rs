@@ -152,8 +152,11 @@ fn save_within(s: &Session, dir: &Path, max_bytes: u64) -> Result<usize> {
         if m.len() as u64 > MAX_META_BYTES {
             return Err(EngineError::Other("recovery metadata is larger than DeckCraft can reopen".into()));
         }
-        write_atomic(&doc, &bytes)?;
+        // Commit the destination policy first. Re-encoding a repaired copy writes empty
+        // members for missing payloads; it may no longer trigger the reader's damage warning.
+        // A failed metadata write must not leave that new snapshot paired with the old path.
         write_atomic(&meta, m.as_bytes())?;
+        write_atomic(&doc, &bytes)?;
         n += 1;
     }
     Ok(n)
