@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (modern-comment PPTX parts declare their XML namespaces; exported parts are checked with a namespace-aware reader before and after reopening; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque root links retained and nested relationship decoding bounded; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -74,7 +74,7 @@ the round trip even though DeckCraft doesn't model it.
 | Tables with styles | yes | yes | Merges and both diagonal borders round-trip |
 | Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw`. Trendlines (type, order or period, forecast, intercept, equation and R²) are read, written and drawn. A combo chart's secondary value axis is read and is not written back when the chart is rebuilt. An unchanged chart also keeps its embedded workbook and the other parts its relationships point at, under fresh `keptN` names so they never replace a part DeckCraft writes (#335); editing the chart drops that workbook instead of writing a stale one |
 | Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept, with their embedded workbook (#335); edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
-| SmartArt (`dgm`) | the drawing part as a group (text laid out on its `dsp:txXfrm` rectangle), and the outline from the data model (Text Pane) | as a diagram: data model from the outline; layout, quick style and colour parts (the file's own kept until the layout is switched); the group as the cached drawing | DeckCraft's layout definitions are simple; a diagram without a cached drawing isn't drawn. SmartArt kept only as XML, without its relationship parts, still loses the drawing and data parts (#203) |
+| SmartArt (`dgm`) | the drawing part as a group (text laid out on its `dsp:txXfrm` rectangle), and the outline from the data model (Text Pane) | as a diagram: data model from the outline; layout, quick style and colour parts (the file's own kept until the layout is switched); the group as the cached drawing | DeckCraft's layout definitions are simple; a diagram without a cached drawing isn't drawn. The opaque path keeps nested part relationships within bounded limits, including a data part's image and hyperlink (`opaque_relationships.rs`, #203 partial); missing, unsupported or over-budget graphs still fall back with a log warning |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
 | Audio / video (`p14:media`, trim, fades, bookmarks; timing-tree playback options) | yes | yes | Volume, autoplay, loop, rewind, play across slides, hide while stopped and video full screen round-trip through `p:audio`/`p:video` nodes (`media_options.rs`); complex playback schedules are not modeled |
 | Ink (`contentPart`) | yes | as a group of freeform lines | PowerPoint sees shapes, not ink |
@@ -82,7 +82,7 @@ the round trip even though DeckCraft doesn't model it.
 | Animations: timing tree, build paragraphs, triggers, motion paths | yes (flattened to the Animation Pane list) | yes (rebuilt) | `every_animation_effect_survives`; repeat, triggers, bounce end and rewind kept |
 | Comments: legacy | yes | yes | |
 | Comments: modern threaded (`p188`) | yes | yes | Written next to the flattened legacy part; replies and resolved state round-trip. The part declares its text and relationship namespaces (#974); `comments.rs` checks every exported XML/relationship part with a namespace-aware reader, including a second save and `.potx`/`.ppsx`. No new PowerPoint open test |
-| Unknown slide-level elements (`graphicFrame` OLE, extensions, `mc:AlternateContent`) | kept | kept | Rendered as a labelled placeholder with the preview picture when present |
+| Unknown slide-level elements (`graphicFrame` OLE, extensions, `mc:AlternateContent`) | kept | kept | Rendered as a labelled placeholder with the preview picture when present. Part-scoped relationships retain their ids and point at fresh export paths; shared parts emit one relationship file. The relationship graph uses media ids so native saves and cross-document copies keep its resources |
 | Embedded fonts | yes | yes | MicroType Express subsets kept, not drawn |
 | Tags (`p:custDataLst`) on the presentation, slides and shapes | yes | yes | Add-ins such as think-cell keep their identity; `tags_survive_round_trip` |
 | Custom XML data, sensitivity label (`docMetadata/LabelInfo.xml`), custom document properties | kept verbatim | yes | SharePoint metadata and the label survive a save; `custom_xml_label_and_custom_properties_survive_save` |
@@ -96,8 +96,9 @@ the round trip even though DeckCraft doesn't model it.
    `corpus_kinds.rs` already check open → save → reopen (parts and text) for decks we author:
    tables, charts, animations, media, sections and masters/layouts among them. Still needed:
    render checks and a PowerPoint reference render for each (owner runs PowerPoint).
-2. Remaining round-trip losses, including relationship-bearing SmartArt/OLE (#203); comments,
-   media playback options and rewind are preserved (#70, #74, #77).
+2. Remaining round-trip losses and strict-save reporting (#203): opaque SmartArt/OLE nested
+   relationships are now kept within bounded limits, but unsupported/missing/over-budget graphs
+   still fall back. Comments, media playback options and rewind are preserved (#70, #74, #77).
 3. SVG rendering. EMF+ records inside a *dual* EMF/WMF are ignored on purpose — the plain EMF
    records carry the same picture; an EMF+ only file plays every EMF+ drawing record.
 
@@ -105,6 +106,9 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Opaque graphs retain media identity through shape/slide clipboard commands; rejected import allocations are discarded without deleting shared media, and export validates complete roots/branches before emitting bytes or links. Package checks include late failures and colliding destination ids |
+| 2026-10-21 | minor | Opaque root hyperlinks are retained; nested relationship XML is limited to 1 MiB per file and 16 MiB of import decoding work, including failed attempts. New regressions cover repeated failed decodes and root-link saves |
+| 2026-10-20 | minor | Opaque part relationships survive PPTX/native saves (#203 partial): original relationship ids, image bytes and external URLs are kept under fresh package paths; traversal is bounded and cycles reuse existing media ids. No new live PowerPoint validation |
 | 2026-10-20 | minor | Modern-comment parts bind the `a:` and `r:` prefixes (#974); namespace-aware regression checks cover each XML/relationship part and a second save in PPTX, POTX and PPSX |
 | 2026-10-20 | minor | Media playback options (#74) read and written through standard timing nodes, including `p:video fullScrn`; tests cover each option, animation coexistence, groups, duplicate model ids, manual start conditions and non-finite/bounded volume |
 | 2026-10-20 | minor | The animation rewind flag round-trips (#77 closed): the reader takes `cTn fill="remove"` and the writer emits it. The media playback options (#74) entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). The EMF+ note says the records inside a *dual* EMF/WMF are ignored on purpose, since the plain EMF records carry the same picture |

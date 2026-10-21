@@ -1551,7 +1551,13 @@ fn an_object_deckcraft_doesnt_model_shows_its_preview_picture() {
         let sh = Shape {
             id: ShapeId(600),
             xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
-            kind: ShapeKind::Opaque { xml: String::new(), preview: with_preview.then_some(media), label: "Package".into(), parts: vec![] },
+            kind: ShapeKind::Opaque {
+                xml: String::new(),
+                preview: with_preview.then_some(media),
+                label: "Package".into(),
+                parts: vec![],
+                rels: vec![],
+            },
             ..Default::default()
         };
         std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];

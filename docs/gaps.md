@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-20 · **Last updated:** 2026-10-20 · **Change:** minor (modern-comment PPTX parts declare their XML namespaces; exported parts are checked with a namespace-aware reader before and after reopening; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque root links and relationship decode work limits covered; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -78,7 +78,7 @@ Detail in [file-format-parity.md](file-format-parity.md).
   effects, text and shape hyperlinks and actions), `corpus_charts.rs` (a combo chart with data
   labels and trendlines, a merged table with diagonal borders, text columns, autofit, vertical
   text, a WordArt warp) and `corpus_media.rs` (SmartArt and OLE kept as XML, with no diagram or
-  embedding parts, which stay with #203; audio and video bookmarks and trims; a section holding a
+  embedding parts in that slice; audio and video bookmarks and trims; a section holding a
   hidden slide; slide-number and date fields; ink as freeform lines; `.glb` 3-D models; animation
   repeat, bounce end and triggers). Losses these checks found are fixed: notes- and handout-master
   text, paragraph default run properties (`defRPr`, including a link), action sounds, a run's
@@ -88,6 +88,16 @@ Detail in [file-format-parity.md](file-format-parity.md).
   Modern-comment parts declare the namespaces used by their text (#974); `comments.rs` checks
   every XML and relationship part on export and after reopening and saving again, including
   `.potx` and `.ppsx`. These structural checks do not replace PowerPoint reference renders.
+  `opaque_relationships.rs` covers SmartArt with no cached drawing whose data part points at
+  an image and hyperlink (#203), repeated and native saves, shared parts, cycles and damaged
+  graphs. Cross-document shape/slide paste covers colliding media ids and external links;
+  rejected graphs discard new allocations and export parts while retaining shared media.
+  Root hyperlinks and nested relationships survive within the import limits (256 parts,
+  1024 work visits, 64 MiB and depth 8 per object; 16,384 work visits per import).
+  Nested relationship XML is capped before decoding at 1 MiB per file and 16 MiB per import;
+  failed attempts still spend work. Missing, unsupported or
+  over-budget graphs still fall back with a log warning; no strict-save mode or new PowerPoint
+  validation is claimed, so #203 is not closed in full.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -366,6 +376,9 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Added opaque graph command regressions for cross-document paste and package checks for rejected import/export data; missing/unsupported/over-budget graphs and strict-save reporting remain |
+| 2026-10-21 | minor | Root hyperlinks no longer reject an intact opaque graph; nested relationship XML and failed decode attempts spend bounded import work before parsing |
+| 2026-10-20 | minor | Bounded nested relationships of opaque SmartArt/OLE parts are preserved (#203 partial), including image bytes, hyperlinks and native saves; missing/unsupported/over-budget graphs and strict-save reporting remain |
 | 2026-10-20 | minor | Fixed unbound namespaces in exported modern comments (#974); namespace-aware package checks supplement the owned corpus, which still needs PowerPoint reference renders |
 | 2026-10-20 | minor | Removed media playback option loss (#74): volume, autoplay, loop, rewind, slide span, hidden state and video full screen round-trip through standard timing nodes; groups, remapped ids and malformed values have regression coverage |
 | 2026-10-20 | minor | The animation rewind flag (#77) round-trips (the reader takes `cTn fill="remove"`, the writer emits it), so row 3 is the media playback options (#74) alone; the entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). New entry: the AV1 decoder is the least exercised of the four video codecs |

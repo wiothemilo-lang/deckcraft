@@ -1,8 +1,8 @@
 //! Owned corpus: SmartArt and OLE kept as XML, audio and video bookmarks and trims, a section with a
 //! hidden slide, slide-number and date fields, ink, 3-D models, and animation repeat, bounce and triggers.
 //!
-//! Relationship-bearing SmartArt and OLE parts stay with issue #203. Media playback options stay
-//! with #74: the flags are not written back, so this file does not assert them. The animation
+//! Nested SmartArt/OLE part relationships are covered by `opaque_relationships.rs`; playback
+//! options have their own checks in `media_options.rs`. The animation
 //! rewind flag (`cTn fill="remove"`) round-trips (see `roundtrip.rs`), so it is no longer a gap.
 
 use std::io::{Cursor, Read, Write};
@@ -64,9 +64,9 @@ fn corpus() -> (Presentation, Vec<u8>, Vec<u8>, Vec<u8>) {
 
     let mut objects = new_slide(&mut p, "Objects");
     let mut diagram = shape(&mut p, "Diagram", 40.0, 80.0, 288.0, 144.0);
-    diagram.kind = ShapeKind::Opaque { xml: SMARTART.into(), preview: None, label: "SmartArt".into(), parts: vec![] };
+    diagram.kind = ShapeKind::Opaque { xml: SMARTART.into(), preview: None, label: "SmartArt".into(), parts: vec![], rels: vec![] };
     let mut embedded = shape(&mut p, "Embedded", 340.0, 80.0, 144.0, 72.0);
-    embedded.kind = ShapeKind::Opaque { xml: OLE.into(), preview: None, label: "DeckCraft.Note.1".into(), parts: vec![] };
+    embedded.kind = ShapeKind::Opaque { xml: OLE.into(), preview: None, label: "DeckCraft.Note.1".into(), parts: vec![], rels: vec![] };
     let mut block_shape = shape(&mut p, "Block", 40.0, 240.0, 120.0, 90.0);
     block_shape.kind = ShapeKind::Model3d { media: block_id, poster: None };
     let mut globe_shape = shape(&mut p, "Globe", 180.0, 240.0, 160.0, 120.0);
@@ -209,7 +209,7 @@ fn object_corpus_round_trips() {
         let ShapeKind::Opaque { xml, label, .. } = &embedded.kind else { panic!("{:?}", embedded.kind) };
         assert_eq!(label, "DeckCraft.Note.1");
         assert!(xml.contains("DeckCraft.Note.1"), "{xml}");
-        assert!(!xml.contains("r:id"), "an embedding part is issue #203");
+        assert!(!xml.contains("r:id"), "this corpus fixture has no embedding relationship");
 
         let block_shape = by_name(q, "Block");
         assert!(matches!(block_shape.kind, ShapeKind::Model3d { poster: None, .. }), "{:?}", block_shape.kind);
