@@ -733,6 +733,7 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
     }
     // Original part name (normalized) → the name written.
     let mut names: HashMap<String, String> = HashMap::new();
+    let mut payloads = Vec::new();
     for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
         let key = norm(&p.name);
         if names.contains_key(&key) {
@@ -744,6 +745,7 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
         // An override per part: a kept part never sets the package-wide default for its extension.
         pkg.xml_part(&new, &ct, p.bytes.clone());
         names.insert(key, new);
+        payloads.push(p);
     }
     let mut rels = RelsOut::default();
     for r in &c.kept.rels {
@@ -756,8 +758,9 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart,
         }
     }
     pkg.rels(chart_name, &rels);
-    // The kept parts' own relationships, pointed at the new names.
-    for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
+    // Reuse the unique payload list, so duplicate logical names cannot cause repeated
+    // relationship parsing or buffered output before the package's final ZIP deduplication.
+    for p in payloads {
         let Some(new_source) = names.get(&norm(&p.name)) else { continue };
         let rp = norm(&rels_path(&p.name));
         let Some(rels_part) = parts.get(&rp) else { continue };

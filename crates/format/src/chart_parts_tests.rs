@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 const PART: &str = "ppt/embeddings/owned.xlsx";
 
+/// An owned grouped chart with one workbook, using the legacy sidecar JSON representation.
 fn fixture(payload: Vec<u8>) -> Presentation {
     // Construct through the old manifest representation: this also exercises compatibility.
     let mut part: ChartPart = serde_json::from_value(json!({
@@ -32,6 +33,7 @@ fn fixture(payload: Vec<u8>) -> Presentation {
     p
 }
 
+/// Find the owned workbook metadata without depending on the shape-kind JSON tag layout.
 fn part_json(value: &mut Value) -> Option<&mut Value> {
     if value.get("name").and_then(Value::as_str) == Some(PART) && value.get("contentType").is_some() {
         return Some(value);
@@ -43,6 +45,7 @@ fn part_json(value: &mut Value) -> Option<&mut Value> {
     }
 }
 
+/// Edit only the manifest while preserving existing ZIP members and their integrity metadata.
 fn rewrite_manifest(bytes: &[u8], edit: impl FnOnce(&mut Value)) -> Vec<u8> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
     let mut json: Value = serde_json::from_slice(&read_entry(&mut z, "presentation.json").unwrap()).unwrap();

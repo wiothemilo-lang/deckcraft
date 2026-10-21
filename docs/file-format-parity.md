@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: chart-local work limits and indexed retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: chart-local work limits and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -12,7 +12,9 @@ Weights inside this dimension: PPTX 70%, PDF export 10%, image export 5%, legacy
 Retained chart work is bounded independently of payload size: 256 parts (including relationship
 sidecars) and 1,024 direct relationships per chart. Native save/load and PPTX export refuse larger
 models explicitly. PPTX capture applies the same cardinality limits; the exporter indexes
-normalized companion names once. This does not add chart editing or new workbook generation.
+normalized companion names once and rewrites each unique payload's relationships once before
+ZIP buffering. Duplicate normalized names keep their first entry. This does not add chart editing
+or new workbook generation.
 
 ## Documents
 
@@ -127,6 +129,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
 | 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
 | 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-21 | minor | Opaque graphs retain media identity through shape/slide clipboard commands; rejected import allocations are discarded without deleting shared media, and export validates complete roots/branches before emitting bytes or links. Package checks include late failures and colliding destination ids |

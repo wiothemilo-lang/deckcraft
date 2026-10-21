@@ -441,6 +441,55 @@ impl PackageOut {
 mod tests {
     use super::*;
 
+    /// Duplicate logical chart names must not multiply relationship work or buffered members.
+    #[test]
+    fn chart_relationships_are_buffered_once_per_normalized_payload() {
+        use deckcraft_model::chart::{Chart, ChartKept, ChartPart, ChartRel, ChartType};
+
+        const PAYLOAD: &str = "ppt/drawings/owned.xml";
+        const COMPANION: &str = "ppt/drawings/_rels/owned.xml.rels";
+        const RT: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        for copies in [1, ChartKept::MAX_PARTS - 2] {
+            let mut chart = Chart::sample(ChartType::Pie);
+            chart.kept.rels.push(ChartRel {
+                id: "drawing".into(),
+                rel_type: format!("{RT}/chartUserShapes"),
+                target: "../drawings/owned.xml".into(),
+                part: PAYLOAD.into(),
+                external: false,
+            });
+            for i in 0..copies {
+                chart.kept.parts.push(ChartPart {
+                    name: if i % 2 == 0 { PAYLOAD.into() } else { PAYLOAD.to_ascii_uppercase() },
+                    content_type: "application/xml".into(),
+                    bytes: b"owned drawing".to_vec(),
+                    native_entry: None,
+                });
+            }
+            for target in ["first", "discarded"] {
+                chart.kept.parts.push(ChartPart {
+                    name: if target == "first" { COMPANION.into() } else { COMPANION.to_ascii_uppercase() },
+                    content_type: "application/vnd.openxmlformats-package.relationships+xml".into(),
+                    bytes: format!(
+                        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="link" Type="{RT}/hyperlink" Target="https://example.invalid/{target}" TargetMode="External"/></Relationships>"#
+                    ).into_bytes(),
+                    native_entry: None,
+                });
+            }
+            assert!(chart.kept.within_limits());
+            let mut package = PackageOut::default();
+            let mut count = 0;
+            crate::write::chart::write_kept(&mut package, "ppt/charts/chart1.xml", &chart, &mut count);
+            assert_eq!(count, 1, "logical payload is emitted once");
+            assert_eq!(package.files.len(), 3, "payload plus root and nested relationships, before ZIP deduplication");
+            let sidecars: Vec<_> = package.files.iter().filter(|(name, _, _)| name == "ppt/drawings/_rels/kept1.xml.rels").collect();
+            assert_eq!(sidecars.len(), 1);
+            let xml = String::from_utf8_lossy(&sidecars[0].1);
+            assert!(xml.contains("https://example.invalid/first"));
+            assert!(!xml.contains("discarded"), "normalized companion lookup keeps its first entry");
+        }
+    }
+
     fn zip_of(entries: &[(&str, usize)]) -> Vec<u8> {
         let mut zw = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
