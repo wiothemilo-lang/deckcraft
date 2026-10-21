@@ -123,6 +123,11 @@ pub fn discard(dir: &Path, uid: u64) {
 /// Write entries for the unsaved presentations (and drop those of saved ones). Returns how many
 /// were written.
 pub fn save(s: &Session, dir: &Path) -> Result<usize> {
+    save_within(s, dir, MAX_ENTRY_BYTES)
+}
+
+/// Apply the recovery reader's encoded-file limit before replacing either checkpoint member.
+fn save_within(s: &Session, dir: &Path, max_bytes: u64) -> Result<usize> {
     std::fs::create_dir_all(dir).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
     claim_dir(dir);
     let mut n = 0;
@@ -133,9 +138,15 @@ pub fn save(s: &Session, dir: &Path) -> Result<usize> {
         }
         let (doc, meta) = files(dir, d.uid);
         let bytes = deckcraft_format::save(&d.doc).map_err(|e| EngineError::Other(e.to_string()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(EngineError::Other("recovery snapshot is larger than DeckCraft can reopen".into()));
+        }
+        let m = json!({"path": d.path, "title": d.title(), "saved": now_secs(), "owner": instance_id()}).to_string();
+        if m.len() as u64 > MAX_META_BYTES {
+            return Err(EngineError::Other("recovery metadata is larger than DeckCraft can reopen".into()));
+        }
         write_atomic(&doc, &bytes)?;
-        let m = json!({"path": d.path, "title": d.title(), "saved": now_secs(), "owner": instance_id()});
-        write_atomic(&meta, m.to_string().as_bytes())?;
+        write_atomic(&meta, m.as_bytes())?;
         n += 1;
     }
     Ok(n)
@@ -271,6 +282,68 @@ mod tests {
         let path = dir.join("saved.deckcraft");
         s3.execute("file.saveAs", &json!({"path": path.to_string_lossy()})).unwrap();
         assert!(list(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A refused native serialization must leave the last readable checkpoint and metadata intact.
+    #[test]
+    fn rejected_snapshot_preserves_the_previous_recovery_entry() {
+        use deckcraft_model::chart::{Chart, ChartKept, ChartPart, ChartType};
+        use deckcraft_model::{Shape, ShapeId, ShapeKind};
+        use std::sync::Arc;
+
+        let dir = temp("recovery-rejected-snapshot");
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        save(&s, &dir).unwrap();
+        let (doc_path, meta_path) = files(&dir, s.doc().unwrap().uid);
+        let previous_doc = std::fs::read(&doc_path).unwrap();
+        let previous_meta = std::fs::read(&meta_path).unwrap();
+
+        let mut chart = Chart::sample(ChartType::Pie);
+        chart.kept.parts = vec![
+            ChartPart {
+                name: "ppt/embeddings/owned.bin".into(),
+                content_type: "application/octet-stream".into(),
+                bytes: vec![],
+                native_entry: None,
+            };
+            ChartKept::MAX_PARTS + 1
+        ];
+        let presentation = Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+        let id = ShapeId(presentation.alloc_id().unwrap());
+        Arc::make_mut(&mut presentation.slides[0]).shapes.push(Shape { id, kind: ShapeKind::Chart(Box::new(chart)), ..Default::default() });
+        assert!(save(&s, &dir).unwrap_err().to_string().contains("per-chart limits"));
+        assert_eq!(std::fs::read(&doc_path).unwrap(), previous_doc);
+        assert_eq!(std::fs::read(&meta_path).unwrap(), previous_meta);
+        assert_eq!(deckcraft_format::load(&previous_doc).unwrap().slides.len(), 2);
+        let mut reopened = Session::new();
+        assert_eq!(open(&mut reopened, &dir).unwrap().len(), 1);
+        assert_eq!(reopened.doc().unwrap().doc.slides.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Even a valid native archive must fit the recovery reader's separate encoded-file cap.
+    #[test]
+    fn oversized_recovery_members_leave_the_previous_checkpoint_intact() {
+        let dir = temp("recovery-member-limits");
+        let mut s = Session::new();
+        s.execute("file.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        save(&s, &dir).unwrap();
+        let (doc_path, meta_path) = files(&dir, s.doc().unwrap().uid);
+        let previous_doc = std::fs::read(&doc_path).unwrap();
+        let previous_meta = std::fs::read(&meta_path).unwrap();
+        assert!(save_within(&s, &dir, 1).unwrap_err().to_string().contains("snapshot"));
+        assert_eq!(std::fs::read(&doc_path).unwrap(), previous_doc);
+        assert_eq!(std::fs::read(&meta_path).unwrap(), previous_meta);
+        // This is small enough for the native format but too large for recovery metadata.
+        s.doc_mut().unwrap().title = "owned".repeat(MAX_META_BYTES as usize / 5 + 1);
+        assert!(save(&s, &dir).unwrap_err().to_string().contains("metadata"));
+        assert_eq!(std::fs::read(&doc_path).unwrap(), previous_doc);
+        assert_eq!(std::fs::read(&meta_path).unwrap(), previous_meta);
+        assert_eq!(deckcraft_format::load(&previous_doc).unwrap().slides.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

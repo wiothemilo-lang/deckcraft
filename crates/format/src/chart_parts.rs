@@ -1,0 +1,172 @@
+//! Keep opaque chart payloads out of the JSON manifest and within the media load budget.
+use std::collections::HashSet;
+use std::io::Cursor;
+use std::sync::Arc;
+
+use deckcraft_model::chart::ChartPart;
+use deckcraft_model::{Master, Presentation, Shape, ShapeKind};
+
+use crate::{Budget, FormatError, MAX_ENTRY, Result, read_entry_max};
+
+const PREFIX: &str = "chart-parts/";
+type Payload = (String, String, Vec<u8>);
+
+/// Refuse saves the reader cannot reopen before cloning chart bytes or constructing an archive.
+pub(super) fn preflight(p: &Presentation, budget: Budget, max_entry: u64) -> Result<()> {
+    let mut items = 0usize;
+    let mut left = budget.total;
+    let mut charge = |bytes: &[u8]| {
+        if items >= budget.items {
+            return Err(FormatError::Write("media and chart parts exceed the combined item limit".into()));
+        }
+        items += 1;
+        let size = bytes.len() as u64;
+        if size > max_entry {
+            return Err(FormatError::Write("embedded media or chart part exceeds the entry limit".into()));
+        }
+        left = left.checked_sub(size).ok_or_else(|| FormatError::Write("media and chart parts exceed the combined byte limit".into()))?;
+        Ok(())
+    };
+    // The manifest lists linked-only and repeated media items too; the reader counts all of them.
+    for media in &p.media {
+        charge(&media.data)?;
+    }
+    let masters = p.masters.iter().chain(p.notes_master.iter()).chain(p.handout_master.iter());
+    let roots = p
+        .slides
+        .iter()
+        .map(|s| s.shapes.as_slice())
+        .chain(masters.flat_map(|m| std::iter::once(m.shapes.as_slice()).chain(m.layouts.iter().map(|l| l.shapes.as_slice()))));
+    for root in roots {
+        let mut pending = vec![root];
+        while let Some(shapes) = pending.pop() {
+            for shape in shapes {
+                match &shape.kind {
+                    ShapeKind::Group { children, .. } => pending.push(children),
+                    ShapeKind::Chart(chart) => {
+                        if !chart.kept.within_limits() {
+                            return Err(FormatError::Write("retained chart data exceeds per-chart limits".into()));
+                        }
+                        for part in &chart.kept.parts {
+                            charge(&part.bytes)?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Move retained bytes into independently referenced native ZIP members.
+pub(super) fn separate(p: &mut Presentation) -> Result<Vec<Payload>> {
+    let mut payloads = Vec::new();
+    visit_parts(p, |part| {
+        // The native namespace is independent of the original OPC names, which may repeat
+        // when charts from several decks are combined. No user-supplied path is extracted.
+        let entry = format!("{PREFIX}{}", payloads.len());
+        part.native_entry = Some(entry.clone());
+        payloads.push((entry, part.content_type.clone(), std::mem::take(&mut part.bytes)));
+        Ok(())
+    })?;
+    Ok(payloads)
+}
+
+/// Restore sidecars while charging the file-wide media budget and per-chart work limits.
+pub(super) fn restore(
+    p: &mut Presentation,
+    z: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    left: &mut u64,
+    mut items: usize,
+    max_items: usize,
+    damaged: &mut Vec<String>,
+) -> Result<()> {
+    let mut seen = HashSet::new();
+    visit_parts(p, |part| {
+        if items >= max_items {
+            return Err(FormatError::Damaged(format!("media and chart parts exceed {max_items} items")));
+        }
+        items += 1;
+        if let Some(entry) = part.native_entry.take() {
+            // Accept only names produced by separate(), and inflate each member once.
+            let canonical = entry.strip_prefix(PREFIX).and_then(|s| s.parse::<usize>().ok()).is_some_and(|n| entry == format!("{PREFIX}{n}"));
+            if !canonical || !seen.insert(entry.clone()) || !part.bytes.is_empty() {
+                return Err(FormatError::Damaged("invalid or ambiguous chart part reference".into()));
+            }
+            if z.index_for_name(&entry).is_none() {
+                // Missing members consume no inflation work and can be reported for recovery.
+                damaged.push(format!("{entry}: missing chart part"));
+                return Ok(());
+            }
+            if z.by_name(&entry).is_ok_and(|f| f.size() > *left) {
+                return Err(FormatError::Damaged("embedded media and chart parts are larger than DeckCraft can open".into()));
+            }
+            // A CRC/decode error may already have inflated bytes. Stop on that first error
+            // rather than letting later corrupt members reuse the unchanged byte budget.
+            let bytes = read_entry_max(z, &entry, (*left).min(MAX_ENTRY))?;
+            *left -= bytes.len() as u64;
+            part.bytes = bytes;
+        } else {
+            // Older manifests used JSON byte arrays. Charge those too, after the existing
+            // bounded manifest parser has read them, so resaving migrates them losslessly.
+            let size = part.bytes.len() as u64;
+            if size > (*left).min(MAX_ENTRY) {
+                return Err(FormatError::Damaged("inline chart part is larger than DeckCraft can open".into()));
+            }
+            *left -= size;
+        }
+        Ok(())
+    })
+}
+
+/// Visit every chart owner, validating a chart before any of its payloads are processed.
+fn visit_parts(p: &mut Presentation, mut visit: impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
+    // Use an explicit stack for groups. Charts can also live on masters and their layouts,
+    // including the notes and handout masters; none of these owners may leak inline bytes.
+    for slide in &mut p.slides {
+        shapes(&mut Arc::make_mut(slide).shapes, &mut visit)?;
+    }
+    for master in &mut p.masters {
+        master_parts(Arc::make_mut(master), &mut visit)?;
+    }
+    for master in [&mut p.notes_master, &mut p.handout_master].into_iter().flatten() {
+        master_parts(Arc::make_mut(master), &mut visit)?;
+    }
+    Ok(())
+}
+
+/// Include both a master's shapes and its layouts in the same validation pass.
+fn master_parts(master: &mut Master, visit: &mut impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
+    shapes(&mut master.shapes, visit)?;
+    for layout in &mut master.layouts {
+        shapes(&mut layout.shapes, visit)?;
+    }
+    Ok(())
+}
+
+/// Walk groups iteratively and reject excessive chart cardinality before reading bytes.
+fn shapes(root: &mut [Shape], visit: &mut impl FnMut(&mut ChartPart) -> Result<()>) -> Result<()> {
+    let mut pending = vec![root];
+    while let Some(shapes) = pending.pop() {
+        for shape in shapes {
+            match &mut shape.kind {
+                ShapeKind::Group { children, .. } => pending.push(children),
+                ShapeKind::Chart(chart) => {
+                    if !chart.kept.within_limits() {
+                        return Err(FormatError::Damaged(format!(
+                            "retained chart data exceeds per-chart limits ({} parts, {} relationships)",
+                            deckcraft_model::chart::ChartKept::MAX_PARTS,
+                            deckcraft_model::chart::ChartKept::MAX_RELS,
+                        )));
+                    }
+                    for part in &mut chart.kept.parts {
+                        visit(part)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}

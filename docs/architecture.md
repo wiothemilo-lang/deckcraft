@@ -1,6 +1,6 @@
 # DeckCraft architecture
 
-> **Last reviewed:** 2026-10-17 · **Last updated:** 2026-10-17 · **Change:** minor (2026-10-17: the control channel requires a token before any method, and the wasm check now covers `mcp` and `deckcraft-web`; 2026-10-14: 320 engine commands, 41 dialogs, the `metafile` crate, 1,641 tests; duplicated L2/L5/L6 rows and headers folded; previous: minor, transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
@@ -64,9 +64,18 @@ overlays an invisible real-text layer with embedded font subsets.
 - **PPTX** (`crates/pptx`): lenient reader (unknown parts skipped, malformed parts logged and
   ignored, sizes and depths bounded, zip bombs capped), writer that PowerPoint opens without
   repair. Unknown elements round-trip through `Opaque` and `raw_ext` fields.
-- **Native** (`crates/format`): zip with `mimetype`, `presentation.json` and `media/<id>`; readers
-  ignore unknown fields; `.slidecraft` files from before the rename open too (the manifest's
-  `format` may name either).
+- **Native** (`crates/format`): zip with `mimetype`, `presentation.json`, `media/<id>` and
+  `chart-parts/<index>`. Chart relationships and payload references stay in the manifest; binary
+  chart parts use bounded ZIP reads and share the media byte/item budgets. Earlier inline chart
+  bytes still load and migrate on save; `.slidecraft` files from before the rename still open.
+  Each chart retains at most 256 parts and 1,024 direct relationships. Native save/load and
+  PPTX export reject larger sidecars; PPTX capture spends the same limits. Export indexes
+  normalized companion names once. Relationship rewrites reuse the unique payload list, so
+  repeated logical names cannot multiply XML parsing or buffered output.
+  Native save and load share the 100,000-item/4 GiB combined payload budgets and 2 GiB
+  entry cap. Save preflights payloads before cloning them, then streams manifest JSON under
+  the entry limit. Recovery also checks its encoded snapshot (2 GiB) and metadata (64 KiB)
+  limits before replacing either member; refusals preserve the previous checkpoint.
 - Formats and their gaps: [file-format-parity.md](file-format-parity.md).
 
 ## Quality gates
@@ -82,8 +91,13 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
+| 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
+| 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
+| 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-20 | minor | The native format reads a file written before the SlideCraft to DeckCraft rename: the manifest's `format` may name `slidecraft` as well as `deckcraft`, and the file opens like any other deck |
 | 2026-10-17 | minor | Control channel: a `control.hello` token handshake before any method (transport-answered, so an unauthenticated peer cannot run one or fill the queue). The wasm check covers `mcp` and the web app, not just the libraries. Both painters are disarmed through commands |
+| 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
 | 2026-10-14 | minor | Community PR wave folded: one L2/L5/L6 row each; command registry 320 (`cmd!` registrations in `cmd/*`), 41 dialogs (titled in `dialogs.rs`), 202k lines, 24 crates (`metafile` added at L0), 1,641 tests. The per-PR rows below give the counts each PR saw on its own branch |
 | 2026-10-14 | minor | Size and Position dialog (`shape.sizePosition`): position, size, rotation, scale and lock aspect in one undo step. 227 commands, 28 dialogs |
 | 2026-10-14 | trivial | Command registry: 228 (`comment.next`, `comment.prev`) |

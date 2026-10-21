@@ -404,13 +404,14 @@ pub struct Chart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
     /// Package parts the original chart still points at (embedded workbook, styles, drawings).
-    /// The writer clears this before comparing modelled state. A native save does not store the bytes.
-    #[serde(skip)]
+    /// The PPTX writer clears this before comparing modelled state. Native saves keep it too.
+    #[serde(skip_serializing_if = "ChartKept::is_empty")]
     pub kept: ChartKept,
 }
 
 /// One relationship of a chart part, with the target string as it was written.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChartRel {
     pub id: String,
     pub rel_type: String,
@@ -423,19 +424,43 @@ pub struct ChartRel {
 }
 
 /// A part reached from a chart (the workbook, a drawing, an image it uses).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChartPart {
     /// Absolute part name (`ppt/embeddings/Workbook.xlsx`).
     pub name: String,
     pub content_type: String,
+    /// Runtime bytes; older native files stored these inline in the manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bytes: Vec<u8>,
+    /// Native ZIP member while encoding/decoding. The native reader consumes this reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_entry: Option<String>,
 }
 
 /// Sidecar for an unchanged chart: relationships and the parts they reach.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ChartKept {
     pub rels: Vec<ChartRel>,
     pub parts: Vec<ChartPart>,
+}
+
+impl ChartKept {
+    /// Maximum retained package parts per chart, including relationship sidecars.
+    pub const MAX_PARTS: usize = 256;
+    /// Maximum direct relationships retained by one chart.
+    pub const MAX_RELS: usize = 1024;
+
+    /// Bound downstream work equally for native files, PPTX capture and programmatic models.
+    pub fn within_limits(&self) -> bool {
+        self.parts.len() <= Self::MAX_PARTS && self.rels.len() <= Self::MAX_RELS
+    }
+
+    /// Omit absent sidecars from ordinary chart JSON.
+    fn is_empty(&self) -> bool {
+        self.rels.is_empty() && self.parts.is_empty()
+    }
 }
 
 impl Default for Chart {

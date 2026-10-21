@@ -1,16 +1,20 @@
 //! The native `.deckcraft` format: a zip holding `presentation.json` (the model, minus media
-//! bytes), `media/<id>` files with the embedded media, and `mimetype`. Readers ignore unknown
-//! fields, so newer files open in older builds with what those builds understand. Files written
-//! before the SlideCraft → DeckCraft rename (`.slidecraft`) are read too.
+//! bytes), `media/<id>` and `chart-parts/<index>` binary entries, and `mimetype`. Readers ignore
+//! unknown fields, so newer files open in older builds with what those builds understand. Files
+//! written before the SlideCraft → DeckCraft rename (`.slidecraft`) are read too.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod chart_parts;
 mod finite;
+
+#[cfg(test)]
+mod chart_parts_tests;
 
 #[cfg(test)]
 mod legacy_tests;
 
-use std::io::{Cursor, Read, Write};
+use std::io::{BufWriter, Cursor, Read, Write};
 use std::sync::Arc;
 
 use deckcraft_model::text::{Paragraph, TextBody};
@@ -31,12 +35,12 @@ pub const EXTENSION: &str = "deckcraft";
 pub const VERSION: u32 = 1;
 /// Largest entry we will inflate (guards against zip bombs).
 const MAX_ENTRY: u64 = 2 << 30;
-/// All embedded media together, inflated (#393).
+/// All embedded media and chart sidecars together, inflated (#393).
 const MAX_TOTAL_MEDIA: u64 = 4 << 30;
-/// Media items one file may list.
+/// Media items and chart sidecar parts one file may list.
 const MAX_MEDIA_ITEMS: usize = 100_000;
 
-/// What one load may inflate.
+/// Combined payload limits shared by native saving and loading.
 #[derive(Clone, Copy)]
 struct Budget {
     total: u64,
@@ -76,7 +80,35 @@ pub fn save_legacy(p: &Presentation) -> Result<Vec<u8>> {
     save_as(p, LEGACY_MIMETYPE, LEGACY_FORMAT_NAME)
 }
 
+/// Save with the same entry and combined payload limits used when reopening the file.
 fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8>> {
+    save_within(p, mimetype, format_name, Budget { total: MAX_TOTAL_MEDIA, items: MAX_MEDIA_ITEMS }, MAX_ENTRY)
+}
+
+/// Limit the manifest's inflated size while streaming JSON directly into its ZIP entry.
+struct LimitedEntry<'a, W> {
+    inner: &'a mut W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for LimitedEntry<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(std::io::Error::other("presentation.json exceeds the entry limit"));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining = self.remaining.saturating_sub(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// The production serializer with injectable limits for small boundary regressions.
+fn save_within(p: &Presentation, mimetype: &str, format_name: &str, budget: Budget, max_entry: u64) -> Result<Vec<u8>> {
+    chart_parts::preflight(p, budget, max_entry)?;
     let mut buf = Cursor::new(Vec::new());
     {
         let mut z = zip::ZipWriter::new(&mut buf);
@@ -85,15 +117,16 @@ fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8
         let w = |e: zip::result::ZipError| FormatError::Write(e.to_string());
         z.start_file("mimetype", stored).map_err(w)?;
         z.write_all(mimetype.as_bytes()).map_err(|e| FormatError::Write(e.to_string()))?;
-        let m = Manifest {
-            format: format_name.into(),
-            version: VERSION,
-            generator: format!("DeckCraft {}", env!("CARGO_PKG_VERSION")),
-            presentation: p.clone(),
-        };
-        let json = serde_json::to_vec(&finite::Finite(&m)).map_err(|e| FormatError::Write(e.to_string()))?;
+        let mut presentation = p.clone();
+        let parts = chart_parts::separate(&mut presentation)?;
+        let m =
+            Manifest { format: format_name.into(), version: VERSION, generator: format!("DeckCraft {}", env!("CARGO_PKG_VERSION")), presentation };
         z.start_file("presentation.json", deflate).map_err(w)?;
-        z.write_all(&json).map_err(|e| FormatError::Write(e.to_string()))?;
+        {
+            let mut json = BufWriter::new(LimitedEntry { inner: &mut z, remaining: max_entry });
+            serde_json::to_writer(&mut json, &finite::Finite(&m)).map_err(|e| FormatError::Write(e.to_string()))?;
+            json.flush().map_err(|e| FormatError::Write(e.to_string()))?;
+        }
         for item in &p.media {
             if item.link.is_some() && item.data.is_empty() {
                 continue;
@@ -102,6 +135,11 @@ fn save_as(p: &Presentation, mimetype: &str, format_name: &str) -> Result<Vec<u8
             let opts = if is_compressed(&item.content_type) { stored } else { deflate };
             z.start_file(format!("media/{}", item.id.0), opts).map_err(w)?;
             z.write_all(&item.data).map_err(|e| FormatError::Write(e.to_string()))?;
+        }
+        for (name, content_type, bytes) in parts {
+            let opts = if is_compressed(&content_type) { stored } else { deflate };
+            z.start_file(name, opts).map_err(w)?;
+            z.write_all(&bytes).map_err(|e| FormatError::Write(e.to_string()))?;
         }
         z.finish().map_err(w)?;
     }
@@ -143,14 +181,15 @@ fn read_entry_max(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str, max: u64) 
     Ok(out)
 }
 
-/// Read a presentation. Embedded media that is missing or damaged is left empty; use
-/// [`load_checked`] to learn which.
+/// Read a presentation. Missing media/chart parts are left empty; use [`load_checked`] to
+/// learn which. A damaged chart member refuses the file before further chart inflation.
 pub fn load(bytes: &[u8]) -> Result<Presentation> {
     load_checked(bytes).map(|(p, _)| p)
 }
 
-/// Read a presentation and list the embedded media that couldn't be read (missing, too large
-/// or failing its CRC), one message each. Linked media saved without its bytes isn't damage.
+/// Read a presentation and list media that couldn't be read, plus missing chart members.
+/// A chart member that is present but fails decoding, CRC or its entry limit refuses the file.
+/// Linked media saved without its bytes isn't damage.
 pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     load_within(bytes, Budget { total: MAX_TOTAL_MEDIA, items: MAX_MEDIA_ITEMS })
 }
@@ -167,7 +206,8 @@ fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String
     }
     let mut p = m.presentation;
     let mut damaged = vec![];
-    if p.media.len() > budget.items {
+    let items = p.media.len();
+    if items > budget.items {
         return Err(FormatError::Damaged(format!("{} media items (at most {})", p.media.len(), budget.items)));
     }
     // A repeated id names the same member: keep the first item, so the member is inflated once
@@ -190,6 +230,7 @@ fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String
             Err(e) => damaged.push(e.to_string()),
         }
     }
+    chart_parts::restore(&mut p, &mut z, &mut left, items, budget.items, &mut damaged)?;
     repair(&mut p);
     Ok((p, damaged))
 }
@@ -689,6 +730,54 @@ pub fn slides_to_outline(p: &Presentation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_sidecars_are_optional_for_older_native_files() {
+        use deckcraft_model::chart::{Chart, ChartType};
+        let chart = Chart::sample(ChartType::Pie);
+        let mut json = serde_json::to_value(&chart).expect("chart JSON");
+        assert!(json.get("kept").is_none(), "empty sidecars should not enlarge ordinary files");
+        assert_eq!(serde_json::from_value::<Chart>(json.clone()).expect("old chart without kept"), chart);
+        json["kept"] = serde_json::json!({});
+        assert_eq!(serde_json::from_value::<Chart>(json).expect("empty sidecar"), chart);
+    }
+
+    #[test]
+    fn native_save_keeps_chart_relationships_and_payloads() {
+        use deckcraft_model::chart::{Chart, ChartKept, ChartPart, ChartRel, ChartType};
+        use deckcraft_model::{Shape, ShapeId, ShapeKind};
+        let kept = ChartKept {
+            rels: vec![ChartRel {
+                id: "rWorkbook".into(),
+                rel_type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package".into(),
+                target: "../embeddings/data.xlsx".into(),
+                part: "ppt/embeddings/data.xlsx".into(),
+                external: false,
+            }],
+            parts: vec![ChartPart {
+                name: "ppt/embeddings/data.xlsx".into(),
+                content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".into(),
+                bytes: vec![0, 255, 128, 42],
+                native_entry: None,
+            }],
+        };
+        let mut p = defaults::new_presentation(None);
+        let chart = Chart { kept: kept.clone(), ..Chart::sample(ChartType::Pie) };
+        let s = Shape { id: ShapeId(p.alloc_id().expect("id")), kind: ShapeKind::Chart(Box::new(chart)), ..Default::default() };
+        // Serialization must reach charts inside groups as well as top-level charts.
+        Arc::make_mut(&mut p.slides[0]).shapes = vec![Shape {
+            id: ShapeId(p.alloc_id().expect("group id")),
+            kind: ShapeKind::Group { children: vec![s], child: Default::default() },
+            ..Default::default()
+        }];
+        let mut q = load(&save(&p).expect("save")).expect("load");
+        for _ in 0..2 {
+            let ShapeKind::Group { children, .. } = &q.slides[0].shapes[0].kind else { panic!("group") };
+            let ShapeKind::Chart(chart) = &children[0].kind else { panic!("chart") };
+            assert_eq!(chart.kept, kept);
+            q = load(&save(&q).expect("save again")).expect("load again");
+        }
+    }
 
     /// The same package without the entries `drop` names.
     fn without(bytes: &[u8], drop: &str) -> Vec<u8> {

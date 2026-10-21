@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (portable fork updater and CI-gated Windows releases; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -136,6 +136,10 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-21 | M2.chart-native: native serialization rejects media/chart totals the reader cannot reopen before replacing files or recovery checkpoints; manifest output is streamed and capped. Scaled boundary and checkpoint-preservation regressions |
+| 2026-10-21 | M2.chart-native: repeated logical chart names no longer multiply relationship parsing or buffered output; synthetic boundary regression checks the package before ZIP deduplication |
+| 2026-10-21 | M2.chart-native: native/PPTX chart work shares per-chart part/relationship limits; PPTX export indexes retained companions instead of nested scans and rejects oversized API models explicitly |
+| 2026-10-21 | M2.chart-native: integrate upstream 0.9 chart ZIP sidecars while retaining flattened ChartAxis and legacy containers; regression covers legacy native saves. Validation: cloud CI; no new live PowerPoint claim or score increase |
 | 2026-10-21 | M0.updater: portable Windows fork can check/download published main builds without Rust, validate bounded packages and switch versions after startup checks. Main builds publish only after full CI; settings and user files stay separate. Feature/readiness scores unchanged |
 | 2026-10-21 | M0.portable: Windows x64 fork bundle builds on GitHub; a small launcher and Desktop shortcut open the release EXE with separate settings/recovery, without Rust on the user's machine. Feature/readiness scores unchanged; [instructions](docs/windows-portable-fork.md) |
 | 2026-10-21 | M2.203: clipboard commands transfer and remap opaque graph media, including external links and colliding ids; rejected import graphs discard new allocations, and export validates complete branches before writing parts. Shared media stays intact; scores unchanged |
@@ -148,13 +152,15 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-20 | minor | Progress log: the undo limit from the preferences is honoured; a failed command leaves no dialog request, clipboard or painter behind; a `.slidecraft` file written before the rename opens again; a PPTX choice in a namespace we cannot read survives a save; the animation timeline and the render filter check are indexed; the AV1 decoder's state is documented. Feature scores unchanged |
 | 2026-10-18 | Interface localization: `crates/engine/src/i18n` translates command, dialog and Backstage ids and the English UI strings at the draw sites (a missing key stays English), Preferences ▸ Language picks English or Tiếng Việt, unset follows the system locale (#15), and coverage tests check every command label, ribbon tab, dialog title and side-menu page. Vietnamese ships with 653 translations, ~60% of the measured UI strings, unreviewed |
 | 2026-10-17 | The loopback control channel requires a token (`control.hello`) before it answers any method, so another process on the machine can no longer drive the app, quit it with unsaved work, or make it read and write files; `deckcraft-web` and `mcp` are in the wasm check; the slide show takes the prefetched frame without blocking; both painters disarm through commands |
+| 2026-10-18 | Native chart sidecar bytes move from JSON arrays into referenced ZIP entries, with shared media byte/item limits and bounded reads; older inline sidecars still load. Synthetic format regressions cover large workbooks and malformed members |
 | 2026-10-17 | Opening a file caps absurd effect sizes (glow, soft edges, shadows, reflections, on shapes, text and table text) at what Format Shape allows: a glow of 10^18 pt in a .pptx made rendering ask for 34 GB and abort |
 | 2026-10-17 | Opening a .deckcraft file whose shapes repeat an id gives the repeats fresh ids (groups, layouts and masters too), so the deck validates and edits by id find one shape |
 | 2026-10-17 | Edit Points: turning a shape into a freeform is one undo step, so Undo brings the original shape back (it used to stay a freeform) |
 | 2026-10-17 | While a placeholder's text is being edited, a click on a shape in front of it selects that shape instead of moving the caret, as in PowerPoint (#931) |
+| 2026-10-15 | Native saves keep an imported chart's embedded workbook, drawings and relationships; headless PPTX → edit → native save/reopen → PPTX tests verify the payloads and stale-workbook rejection |
+| 2026-10-15 | PPTX trigger sequences keep separate On Click steps, including paragraph builds; synthetic import/edit/save/reopen and headless show regressions |
 | 2026-10-16 | Export: PNG with a transparent background — the slide background is left out, only the slide's content is drawn (Export… dialog, File › Export, web download, `file.export`/`file.render` `transparentBackground`, `deckcraft-cli render --transparent`) (#784) |
 | 2026-10-16 | Arrange ▸ Align: Align to Slide and Align Selected Objects, as in PowerPoint. One object aligns to the slide and several to each other until the other choice is ticked; the choice holds for that selection and also drives Distribute |
-| 2026-10-15 | PPTX trigger sequences keep separate On Click steps, including paragraph builds; synthetic import/edit/save/reopen and headless show regressions |
 | 2026-10-15 | CLI: .txt and .md export includes table cell text, which it used to skip silently (#814) |
 | 2026-10-15 | A `.pptx` slide that can't be read is reported, not dropped in silence: `lostSlides` from `file.open`, a message and a repaired copy in the app, a warning from `deckcraft-cli` (#203) |
 | 2026-10-16 | AutoFormat as you type: ordinals (1st, 22nd, 103rd) get superscript suffixes after a space or punctuation; Tools ▸ AutoCorrect and `text.autocorrect {ordinals}` turn it off |
@@ -254,6 +260,10 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
+| 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
+| 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
+| 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-21 | minor | Portable fork updates and CI-gated main releases; feature scores unchanged |
 | 2026-10-21 | minor | Portable Windows fork packaging and launcher; no change to feature scores |
 | 2026-10-21 | minor | Opaque graph clipboard and rejection boundaries covered by command/package regressions; no new hidden rejected allocations or export parts, and no change to feature scores |
@@ -263,9 +273,11 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-20 | trivial | Control-server CI tests distinguish a single-line rejection from a pipelined TCP reset; readiness scores unchanged |
 | 2026-10-20 | minor | Media playback option loss (#74) closed; full-screen video and independent clip targeting covered. Readiness percentages unchanged |
 | 2026-10-18 | minor | Localization ~8% → ~20%: the catalog, the language setting (#15) and a Vietnamese draft landed; Languages table, Upcoming item 3, the beta plan and the progress log updated |
+| 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
+| 2026-10-15 | trivial | Progress log: chart package parts survive a native save. Scores and milestone names unchanged |
+| 2026-10-15 | trivial | Progress log: PPTX trigger click-step round trip. Feature scores and milestone names unchanged |
 | 2026-10-16 | trivial | Progress log: PNG export with a transparent background (#784) |
 | 2026-10-16 | trivial | Progress log: a `.ppsx` from the system starts the slide show (#862) |
-| 2026-10-15 | trivial | Progress log: PPTX trigger click-step round trip. Feature scores and milestone names unchanged |
 | 2026-10-14 | trivial | remote MCP checks reply IDs, envelopes and bounded newline framing (#718) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: headline breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) and the feature-area breadths from `cargo xtask parity`; one row per area; Upcoming item 2 merged; per-PR count notes dropped from the progress log. Ready stays ~55%, stage alpha |

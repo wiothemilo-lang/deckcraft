@@ -5,6 +5,9 @@ reviews:
   profile: chill
   poem: false
   auto_review:
+    # Dependabot bumps are checked by CI.
+    ignore_usernames:
+      - "dependabot[bot]"
     enabled: true
     drafts: false
     base_branches:

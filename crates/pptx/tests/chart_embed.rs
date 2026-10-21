@@ -328,3 +328,95 @@ fn an_unchanged_chartex_keeps_its_embedded_workbook() {
     assert!(saved.iter().all(|(n, _)| n != "ppt/charts/_rels/chart1.xml.rels"), "the fallback chart has no workbook");
     assert!(!text_of(&saved, "ppt/charts/chart1.xml").contains("externalData"));
 }
+
+/// Oversized API models fail explicitly, including charts nested in every native shape owner.
+#[test]
+fn oversized_chart_sidecars_are_rejected_before_pptx_export() {
+    use deckcraft_model::Master;
+    use deckcraft_model::chart::ChartKept;
+
+    let base = chart_of(&with_workbook(&chart_pptx()));
+    for too_many_parts in [true, false] {
+        let mut chart = base.clone();
+        if too_many_parts {
+            chart.kept.parts.resize(ChartKept::MAX_PARTS + 1, chart.kept.parts[0].clone());
+        } else {
+            chart.kept.rels.resize(ChartKept::MAX_RELS + 1, chart.kept.rels[0].clone());
+        }
+        let leaf = Shape { id: ShapeId(100), kind: ShapeKind::Chart(Box::new(chart)), ..Default::default() };
+        let grouped = Shape { id: ShapeId(101), kind: ShapeKind::Group { children: vec![leaf], child: Default::default() }, ..Default::default() };
+        for owner in 0..5 {
+            let mut p = defaults::new_presentation(None);
+            let shapes = vec![grouped.clone()];
+            match owner {
+                0 => Arc::make_mut(&mut p.slides[0]).shapes = shapes,
+                1 => Arc::make_mut(&mut p.masters[0]).shapes = shapes,
+                2 => Arc::make_mut(&mut p.masters[0]).layouts[0].shapes = shapes,
+                3 => p.notes_master = Some(Arc::new(Master { shapes, ..Default::default() })),
+                _ => p.handout_master = Some(Arc::new(Master { shapes, ..Default::default() })),
+            }
+            let error = deckcraft_pptx::export(&p).unwrap_err().to_string();
+            assert!(error.contains("per-chart limits"), "owner {owner}: {error}");
+        }
+    }
+}
+
+/// A permitted chart with many absent relationship companions keeps every unique payload.
+#[test]
+fn chart_payloads_at_the_limit_export_without_relationship_sidecars() {
+    use deckcraft_model::chart::ChartKept;
+
+    let mut p = deckcraft_pptx::import(&with_workbook(&chart_pptx())).unwrap();
+    let ShapeKind::Chart(chart) = &mut Arc::make_mut(&mut p.slides[0]).shapes[0].kind else { panic!("chart") };
+    let seed = chart.kept.parts[0].clone();
+    for i in 1..ChartKept::MAX_PARTS {
+        let mut part = seed.clone();
+        part.name = format!("ppt/embeddings/owned-{i}.bin");
+        chart.kept.parts.push(part);
+    }
+    let saved = parts(&deckcraft_pptx::export(&p).unwrap());
+    unique_names(&saved);
+    assert_eq!(saved.iter().filter(|(name, _)| name.starts_with("ppt/embeddings/kept")).count(), ChartKept::MAX_PARTS);
+    assert!(text_of(&saved, "ppt/charts/_rels/chart1.xml.rels").contains("../embeddings/kept1.xlsx"));
+}
+
+/// The last payload cannot add a relationship sidecar past the shared native/import limit.
+#[test]
+fn pptx_capture_counts_relationship_parts_at_the_chart_boundary() {
+    use deckcraft_model::chart::ChartKept;
+
+    let mut root = String::from(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+    let mut extra = Vec::new();
+    for i in 0..ChartKept::MAX_PARTS {
+        root.push_str(&format!(r#"<Relationship Id="r{i}" Type="{RT}/package" Target="../embeddings/owned-{i}.bin"/>"#));
+        extra.push((format!("ppt/embeddings/owned-{i}.bin"), Vec::new()));
+    }
+    root.push_str("</Relationships>");
+    let last = ChartKept::MAX_PARTS - 1;
+    extra.push((
+        format!("ppt/embeddings/_rels/owned-{last}.bin.rels"),
+        format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="tail" Type="{RT}/image" Target="../media/tail.bin"/></Relationships>"#).into_bytes(),
+    ));
+    extra.push(("ppt/media/tail.bin".into(), vec![]));
+    extra.push(("ppt/charts/_rels/chart1.xml.rels".into(), root.into_bytes()));
+    let refs: Vec<_> = extra.iter().map(|(name, bytes)| (name.as_str(), bytes.as_slice())).collect();
+    let chart = chart_of(&rewrite(&chart_pptx(), |_, bytes| bytes, &refs));
+    assert!(chart.kept.within_limits());
+    assert_eq!(chart.kept.parts.len(), ChartKept::MAX_PARTS - 1);
+    assert!(!chart.kept.parts.iter().any(|p| p.name.ends_with(&format!("owned-{last}.bin"))));
+}
+
+/// Root relationship work has the same cap whether the chart came from native JSON or PPTX.
+#[test]
+fn pptx_capture_caps_direct_chart_relationships() {
+    use deckcraft_model::chart::ChartKept;
+
+    let mut rels = String::from(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+    for i in 0..=ChartKept::MAX_RELS {
+        rels.push_str(&format!(r#"<Relationship Id="r{i}" Type="{RT}/hyperlink" Target="https://example.invalid/{i}" TargetMode="External"/>"#));
+    }
+    rels.push_str("</Relationships>");
+    let chart = chart_of(&rewrite(&chart_pptx(), |_, bytes| bytes, &[("ppt/charts/_rels/chart1.xml.rels", rels.as_bytes())]));
+    assert!(chart.kept.within_limits());
+    assert_eq!(chart.kept.rels.len(), ChartKept::MAX_RELS);
+}

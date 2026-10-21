@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque root links retained and nested relationship decoding bounded; aggregate readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (upstream 0.9 sync: shared native save/load budgets and unique retained-part export; bounded chart ZIP sidecars; fork ChartAxis, legacy formats, opaque graphs, control auth and updater retained; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -8,6 +8,19 @@ Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% re
 
 Weights inside this dimension: PPTX 70%, PDF export 10%, image export 5%, legacy binary formats
 5%, everything else (templates, shows, macros, ODP, video, GIF, outline) 10%.
+
+Retained chart work is bounded independently of payload size: 256 parts (including relationship
+sidecars) and 1,024 direct relationships per chart. Native save/load and PPTX export refuse larger
+models explicitly. PPTX capture applies the same cardinality limits; the exporter indexes
+normalized companion names once and rewrites each unique payload's relationships once before
+ZIP buffering. Duplicate normalized names keep their first entry. This does not add chart editing
+or new workbook generation.
+
+Native save also preflights the same 100,000 combined media/chart items, 4 GiB combined
+payload bytes and 2 GiB per-entry limits as the reader, including linked-only item counts.
+Manifest JSON is streamed through a bounded writer; no second full JSON byte buffer is needed.
+Boundary tests use reduced budgets, and an engine regression preserves the last readable
+recovery checkpoint on serializer refusal or oversized encoded snapshot/metadata. This does not establish a cause or resolution for #1092.
 
 ## Documents
 
@@ -33,6 +46,22 @@ PowerPoint opens and saves; Viewer = opens only).
 | Print | yes | n/a | no | PR #66 (browser) open | none |
 
 ## Pictures and media inside decks
+
+Native files retain a nonempty chart `kept` sidecar: relationships, part names, content types
+and `nativeEntry` references live in `presentation.json`; exact binary payloads live in distinct
+`chart-parts/<index>` ZIP members. This keeps workbooks and drawings through a native save before
+exporting back to PPTX without expanding workbook bytes into JSON numbers. Chart parts and
+media share the 4 GiB inflated-byte and 100,000-item budgets; each member is read through the
+existing 2 GiB entry limit. Missing chart members are reported by `load_checked` and left empty.
+A present chart member that fails decoding, CRC or its entry limit refuses the file immediately,
+so later corrupt members cannot reuse the remaining inflation budget. Invalid, reused or
+ambiguous references are refused. A synthetic 3 MiB payload test
+checks the ZIP layout and bounded reads, alongside shared-budget and all-owner round trips.
+
+Older native files without a sidecar still load. Earlier inline chart byte arrays are read
+under the existing manifest-size limit, then charged to the shared budget; saving migrates them
+to ZIP members. Builds predating chart-sidecar support ignore it and lose it on resave. The
+intermediate build that required inline `bytes` cannot read the new referenced representation.
 
 | Kind | PowerPoint | DeckCraft | Notes |
 |---|---|---|---|
@@ -106,12 +135,18 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
+| 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
+| 2026-10-21 | minor | Bound retained charts to 256 package parts and 1,024 direct relationships across native save/load, PPTX capture and export preflight; index normalized export companions once. Synthetic boundary tests cover zero-byte legacy parts, every shape owner and the relationship-sidecar slot. Scores unchanged |
+| 2026-10-21 | minor | Sync upstream 0.9 bounded chart ZIP sidecars; retain fork ChartAxis serialization and legacy containers. Add a legacy chart-sidecar save regression; no new readiness score or live PowerPoint validation |
 | 2026-10-21 | minor | Opaque graphs retain media identity through shape/slide clipboard commands; rejected import allocations are discarded without deleting shared media, and export validates complete roots/branches before emitting bytes or links. Package checks include late failures and colliding destination ids |
 | 2026-10-21 | minor | Opaque root hyperlinks are retained; nested relationship XML is limited to 1 MiB per file and 16 MiB of import decoding work, including failed attempts. New regressions cover repeated failed decodes and root-link saves |
 | 2026-10-20 | minor | Opaque part relationships survive PPTX/native saves (#203 partial): original relationship ids, image bytes and external URLs are kept under fresh package paths; traversal is bounded and cycles reuse existing media ids. No new live PowerPoint validation |
 | 2026-10-20 | minor | Modern-comment parts bind the `a:` and `r:` prefixes (#974); namespace-aware regression checks cover each XML/relationship part and a second save in PPTX, POTX and PPSX |
 | 2026-10-20 | minor | Media playback options (#74) read and written through standard timing nodes, including `p:video fullScrn`; tests cover each option, animation coexistence, groups, duplicate model ids, manual start conditions and non-finite/bounded volume |
 | 2026-10-20 | minor | The animation rewind flag round-trips (#77 closed): the reader takes `cTn fill="remove"` and the writer emits it. The media playback options (#74) entry now names what is kept (trim, fades, bookmarks) and what is lost (volume, autoplay, loop, rewind, play across slides, hide while not playing, full screen). The EMF+ note says the records inside a *dual* EMF/WMF are ignored on purpose, since the plain EMF records carry the same picture |
+| 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
+| 2026-10-15 | trivial | Native `.deckcraft` files serialize a nonempty chart `kept` sidecar (relationships, part names, content types and bytes). Older files without it still load; empty sidecars are omitted. Headless PPTX → edit → native save/reopen → PPTX checks keep the workbook and drawing bytes; editing chart data still drops the stale workbook |
 | 2026-10-15 | trivial | PPTX interactive timing sequences keep later On Click steps and paragraph click builds (`trigger_steps.rs`); mixed starts and independent buttons survive import/edit/save/reopen |
 | 2026-10-15 | minor | A `.pptx` slide that can't be read is reported instead of dropped in silence: `file.open` and `file.openBytes` return `lostSlides`, the app shows a message and opens a repaired copy (Save asks for a new name), and `deckcraft-cli` warns on stderr (#203) |
 | 2026-10-16 | minor | PNG slide export with a transparent background (#784) |
