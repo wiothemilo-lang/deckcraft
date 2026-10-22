@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~20 points and ~120–210 h away
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint destination publication follows document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -136,6 +136,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-21 | M0.recovery1092: damaged AutoRecover snapshots open as repaired copies and require an explicit save destination; bounded native/PPTX save/error and checkpoint-write-failure regressions; destinations are detached during replacement and published only for matching new snapshots, with evidence-preserving triage guidance. Original #1092 crash/lost slides remain unreproduced |
 | 2026-10-21 | M0.web959: WASM document creation avoids unsupported PID calls; cloud CI builds/starts the real web app in Chromium on sample, blank and forced WebGL routes, complementing compile-only WASM checks |
 | 2026-10-21 | M2.chart-native: native serialization rejects media/chart totals the reader cannot reopen before replacing files or recovery checkpoints; manifest output is streamed and capped. Scaled boundary and checkpoint-preservation regressions |
 | 2026-10-21 | M2.chart-native: repeated logical chart names no longer multiply relationship parsing or buffered output; synthetic boundary regression checks the package before ZIP deduplication |
@@ -261,6 +262,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Recovery keeps damaged copies detached. Checkpoint updates detach the destination, replace document bytes, then publish the matching path. Fault tests cover every replacement and restart, including stale checkpoints after failed Save As cleanup. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |

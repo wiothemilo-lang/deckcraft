@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (opaque root links and relationship decode work bounds covered; SmartArt remains partial and weighted breadth is unchanged).
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint destination publication follows document replacement; #1092 investigation remains open; readiness scores unchanged)
 
 > **Generated:** 2026-10-14 (bullets/numbering remain D after empty-line marker review; summary by `cargo xtask parity`; rows re-scored by the 2026-10-14 community PR wave, duplicate Thesaurus, AutoCorrect, Artistic effects and Corrections rows folded; Preview in editor re-scored 2026-10-13; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -62,7 +62,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Open/save .potx/.ppsx/.pptm variants (.potx/.ppsx open; saved with the .pptx content type; no .pptm) | P2 | P |
 | Files | Legacy .ppt (binary) import | P2 | M |
 | Files | Save as template | P1 | D |
-| Files | Autosave and crash recovery | P0 | D |
+| Files | Autosave and crash recovery (damaged snapshots require a repaired copy) | P0 | D |
 | Files | Document properties | P2 | D |
 | Files | Export to PDF (slides, notes pages, handouts; text layer, links, bookmarks; vector artwork pending) | P0 | P |
 | Files | Export slides as PNG/JPEG | P0 | D |
@@ -240,6 +240,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Recovery keeps damaged copies detached. Checkpoint updates detach the destination, replace document bytes, then publish the matching path. Fault tests cover every replacement and restart, including stale checkpoints after failed Save As cleanup. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | SmartArt stays P after covering opaque graph identity through clipboard commands and cleanup of rejected graph data; breadth and aggregate scores unchanged |
 | 2026-10-21 | minor | SmartArt remains P after retaining opaque root hyperlinks and bounding nested relationship decoding before allocation; breadth unchanged |
 | 2026-10-20 | minor | SmartArt remains P after preserving bounded nested relationships on the opaque path (#203 partial); rendering/editing breadth and aggregate scores unchanged |

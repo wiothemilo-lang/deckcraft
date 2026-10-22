@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (web startup #959: native-only process/clock entropy; actual Chromium runtime smoke for sample/blank and WebGL routes; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-21 · **Last updated:** 2026-10-21 · **Change:** minor (damaged recovery copies require an explicit save destination; checkpoint destination publication follows document replacement; #1092 investigation remains open; readiness scores unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -15,26 +15,24 @@ points and lead the beta plan.
 
 | Core workflow | Works end to end? | Evidence | Hours to full pass |
 |---|---|---|---|
-| Build a deck from scratch (theme, layouts, titles and bullets, shapes, pictures from file), save, close and reopen it | yes | Commands for all of it; `.deckcraft` and `.pptx` round-trip tests (`crates/pptx/tests/roundtrip.rs`, `crates/format`); AutoRecover. Close discards edits without asking (#60, PR #75); image *paste* fails on Windows/Linux (#53), though insert-from-file works | 1–3 |
+| Build a deck from scratch (theme, layouts, titles and bullets, shapes, pictures from file), save, close and reopen it | yes | Commands for all of it; `.deckcraft` and `.pptx` round-trip tests (`crates/pptx/tests/roundtrip.rs`, `crates/format`); AutoRecover. Dirty close prompts in the current UI; damaged recovery snapshots require a repaired copy. The #1092 data-loss incident remains unverified; OS clipboard coverage is still limited | 1–3 |
 | Open a colleague's `.pptx`, edit it, save it back as `.pptx` that PowerPoint opens | partial (not blocking) | The reader is lenient and keeps unknown objects. Files open in PowerPoint without repair (checked 2026-10-06). Comment threads, media options and rewind round-trip (#70, #74, #77). But only generated decks have been tested | 31–55 |
 | Present: full-screen show with transitions, animations, media, presenter view with notes, next slide and timer | yes | 48/48 transitions, 64 effects, triggers, builds, media playback, presenter window, See All Slides and zoom. The presenter timer pauses and resets, and notes have a size control. A custom show plays only its slides. Typing a slide number during the show shows it, and Enter goes there. Presenter view isn't placed on the second display automatically (drag it there; #433) | 2–4 |
 | Add business content: tables, charts with their data, simple diagrams | partial (not blocking) | Tables with styles, merge/split, all D or P. Charts insert with the common types and edit data in the Chart Data dialog (P0 partial); SmartArt is basic (pre-drawn shapes) | 12–20 |
 | Share the deck: PDF of slides, notes or handouts; images | yes | `file.export` PDF with text layer, links, bookmarks, handouts 1–9; PNG/JPEG. Artwork is raster in the PDF; no direct print (print the PDF) | 10–16 |
 | Review: comments with replies, resolve, spelling | partial (not blocking) | Comments, replies and resolve work and survive `.deckcraft` and `.pptx` (#70); Previous and Next walk every slide and the pane lists them; spelling uses installed Hunspell dictionaries (only a short built-in list where none is installed) | 4–8 |
 
-## Current focus (2026-10-10)
+## Current focus (2026-10-21)
 
-1. **Stop losing work and crashing:** land Close's save prompt (#60, PR #75), the Windows GPU
-   startup crashes (#40, #59), image paste on Windows/Linux (#53). 6–12 h.
-2. **PPTX on real decks:** the owned corpus (`crates/pptx/tests/corpus*.rs`) round-trips decks we
-   author: tables, charts, animations, media, sections, masters and layouts, comments, links and
-   actions, custom shows, rotated groups, inherited placeholders, text effects and body layout,
-   theme effects, fills, bevels, connectors, 3-D models and animation bounce end, and keeps notes-
-   and handout-master text, paragraph defaults and action sounds. Still open: decks from outside
-   this repo, relationship-bearing SmartArt and OLE
-   (#203) and SVG. 31–55 h.
-3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
-   open-with (#68), font lookup (#80), Ukrainian (#34, redone against the catalog). 4–8 h.
+1. **Save/recovery safety:** investigate #1092 with preserved incident evidence. Missing-part
+   recovery now uses repaired-copy protection, with bounded native/PPTX save/error and checkpoint-write-failure regressions.
+   The reported video crash and lost slides still need a reproduction; see
+   [data-recovery.md](data-recovery.md). Upstream/native chart integration and web startup #959
+   runtime coverage are landed in this fork.
+2. **Explain file-format loss before replacement:** improve unsupported-content reporting and
+   strict saving for #203; retained opaque/chart graphs do not prove every input is lossless.
+3. **Verify everyday workflows:** Windows clipboard, text/chart edits and slideshow/media runtime,
+   using owned fixtures, bounded resources and save/reopen checks.
 
 ## Plan to beta (~120–210 h; ~40–70 h wall clock with 3–4 agents)
 
@@ -115,6 +113,7 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Recovery keeps damaged copies detached. Checkpoint updates detach the destination, replace document bytes, then publish the matching path. Fault tests cover every replacement and restart, including stale checkpoints after failed Save As cleanup. #1092 remains unresolved; scores unchanged |
 | 2026-10-21 | minor | Browser document IDs avoid native process/clock APIs (#959). Add actual Chromium startup checks for sample/blank and forced WebGL, with short-lived diagnostics and pinned build/test tools. Native UID behavior and readiness scores unchanged; hardware WebGPU not certified |
 | 2026-10-21 | minor | Native save preflights the reader's combined media/chart count and byte limits plus individual entries, and streams manifest JSON under the same entry cap. Small boundary tests cover both container names and all owners; recovery refuses encoded snapshots over 2 GiB or metadata over 64 KiB before replacement, keeping the previous checkpoint. Shared Nix workflow revision pinned; readiness unchanged |
 | 2026-10-21 | minor | Retained chart payloads with the same normalized name share one relationship rewrite and one buffered sidecar; preserve first-entry semantics. A regression checks package buffers before final ZIP deduplication, including mixed-case names at the chart limit |
